@@ -203,7 +203,7 @@ class PlantGuardTracer:
 
         def pct(vals: List[float], p: float) -> float:
             if not vals:
-                return 15.0
+                return 0.0
             s = sorted(vals)
             k = (len(s) - 1) * (p / 100.0)
             f = int(k)
@@ -217,7 +217,7 @@ class PlantGuardTracer:
         p99_intake = pct(intake_latencies, 99)
         p50_rag = pct(rag_latencies, 50)
         p95_rag = pct(rag_latencies, 95)
-        avg_cost = round(statistics.mean(costs), 4) if costs else 0.0028
+        avg_cost = round(statistics.mean(costs), 4) if costs else 0.0
         success_rate = round(successful_spans / total_spans, 4) if total_spans else 1.0
 
         return {

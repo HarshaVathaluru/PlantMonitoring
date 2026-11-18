@@ -37,7 +37,9 @@ class WorkflowState(BaseModel):
     approval_reason: Optional[str] = None
     approval_decision: Optional[str] = None  # None, APPROVE, REJECT
     approval_role: Optional[str] = None
+    approver_role: Optional[str] = None
     approver_comments: Optional[str] = None
+    approval_comments: Optional[str] = None
     
     # Execution & Audit
     execution_result: Optional[Dict[str, Any]] = None

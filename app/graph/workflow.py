@@ -15,7 +15,7 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
@@ -111,6 +111,38 @@ class SQLiteCheckpointer:
         return None
 
 
+# ── Production LangGraph Typed State Schema ──
+
+class WorkflowGraphState(TypedDict, total=False):
+    """Authoritative typed schema for LangGraph StateGraph execution channels."""
+    thread_id: str
+    current_node: str
+    status: str
+    raw_alert: Dict[str, Any]
+    maintenance_event: Optional[Dict[str, Any]]
+    validation_passed: bool
+    sensor_history: List[Dict[str, Any]]
+    root_cause_analysis: Optional[str]
+    rag_citations: List[str]
+    rag_procedure: Optional[str]
+    spare_parts_checked: List[Dict[str, Any]]
+    technician_scheduled: Optional[Dict[str, Any]]
+    estimated_downtime_cost: float
+    recommendation: Optional[Dict[str, Any]]
+    safety_review: Optional[Dict[str, Any]]
+    requires_human_approval: bool
+    approval_reason: Optional[str]
+    approval_decision: Optional[str]
+    approval_role: Optional[str]
+    approver_role: Optional[str]
+    approver_comments: Optional[str]
+    approval_comments: Optional[str]
+    execution_completed: bool
+    execution_result: Optional[Dict[str, Any]]
+    errors: List[str]
+    updated_at: str
+
+
 # ── Production LangGraph StateGraph Workflow ──
 
 class MaintenanceWorkflow:
@@ -135,7 +167,7 @@ class MaintenanceWorkflow:
 
     def _build_langgraph(self):
         """Construct the formal LangGraph StateGraph with nodes, edges, and interrupts."""
-        builder = StateGraph(dict)
+        builder = StateGraph(WorkflowGraphState)
 
         # Register Graph Nodes
         builder.add_node("alert_intake", self._node_alert_intake_graph)
@@ -444,12 +476,13 @@ class MaintenanceWorkflow:
         logger.info(f"[{state.thread_id}] Dispatched maintenance work order and technician")
         state.execution_completed = True
         state.status = "COMPLETED"
+        auth_role = getattr(state, "approver_role", None) or getattr(state, "approval_role", None) or "system_automated"
         state.execution_result = {
             "outcome": "SUCCESS",
             "work_order_id": f"WO-{state.thread_id}",
             "status": WorkOrderStatus.APPROVED.value,
             "dispatched_at": datetime.now(timezone.utc).isoformat(),
-            "authorized_by": state.approval_role or "system_automated",
+            "authorized_by": auth_role,
         }
         self.checkpointer.save(state)
         return state
@@ -493,7 +526,9 @@ class MaintenanceWorkflow:
 
         loaded.approval_decision = decision.upper()
         loaded.approval_role = role
+        loaded.approver_role = role
         loaded.approver_comments = comments
+        loaded.approval_comments = comments
         self.checkpointer.save(loaded)
 
         config = {"configurable": {"thread_id": thread_id}}

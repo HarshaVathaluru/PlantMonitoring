@@ -543,10 +543,28 @@ class HybridRAGEngine:
                     retrieved_chunks=retrieved,
                 )
 
-            # Synthesize answer from top retrieved chunks
-            citations = [f"[{r.chunk.chunk_id}]" for r in retrieved[:3]]
-            chunk_excerpts = []
+            # Only synthesize if chunks have high relevance to query keywords
+            q_words = set(re.findall(r"\w{3,}", q_lower))
+            relevant_chunks = []
             for r in retrieved[:3]:
+                c_words = set(re.findall(r"\w{3,}", r.chunk.content.lower()))
+                overlap = len(q_words & c_words)
+                if overlap >= 2 or r.fused_score >= 0.25:
+                    relevant_chunks.append(r)
+
+            if not relevant_chunks:
+                return GroundedAnswer(
+                    question=question,
+                    answer="I cannot verify this procedure or specification from the retrieved documentation. No sufficiently relevant procedures were located in the authorized repository.",
+                    citations=[],
+                    confidence="refusal",
+                    is_supported=False,
+                    retrieved_chunks=retrieved,
+                )
+
+            citations = [f"[{r.chunk.chunk_id}]" for r in relevant_chunks]
+            chunk_excerpts = []
+            for r in relevant_chunks:
                 chunk_excerpts.append(f"According to {r.chunk.doc_title} ({r.chunk.section}) [{r.chunk.chunk_id}]: {r.chunk.content.strip()}")
             synthesized_answer = "\n\n".join(chunk_excerpts)
 
@@ -556,5 +574,5 @@ class HybridRAGEngine:
                 citations=citations,
                 confidence="high",
                 is_supported=True,
-                retrieved_chunks=retrieved,
+                retrieved_chunks=relevant_chunks,
             )

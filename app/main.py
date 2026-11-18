@@ -151,105 +151,150 @@ def list_recorded_traces():
 def ingest_telemetry_alert(req: IntakeRequest):
     """
     Ingest, validate, and parse telemetry alert.
-    Applies physical plausibility and prompt injection scans.
+    Applies physical plausibility and prompt injection scans under Circuit Breaker protection.
     """
+    def _do_intake():
+        # Probe P1 scan
+        inj_scan = safety_engine.scan_direct_injection(req.message or "")
+        if inj_scan.injection_detected:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Security alert: Prompt injection pattern detected: {inj_scan.reasons}",
+            )
+
+        # Probe P3 physical plausibility check
+        plaus_result = safety_engine.validate_physical_plausibility(
+            vibration_mm_s=req.vibration_mm_s,
+            temp_c=req.temp_c,
+            pressure_bar=req.pressure_bar,
+            current_a=req.current_a,
+        )
+
+        readings = SensorReadings(
+            vibration_mm_s=req.vibration_mm_s,
+            temp_c=req.temp_c,
+            pressure_bar=req.pressure_bar,
+            current_a=req.current_a,
+        )
+
+        try:
+            sev = RiskLevel(req.severity.lower())
+        except ValueError:
+            sev = RiskLevel.MEDIUM
+
+        event = MaintenanceEvent(
+            event_id=f"EV-API-{int(datetime.now().timestamp())}",
+            source=EventSource.SENSOR_ALERT,
+            received_at=datetime.now(),
+            raw_text=req.message or f"Alert for {req.asset_tag}",
+            asset_tag=req.asset_tag,
+            readings=readings,
+            severity=sev,
+        )
+
+        return {
+            "event_id": event.event_id,
+            "asset_tag": event.asset_tag,
+            "severity": event.severity.value,
+            "plausibility": plaus_result.model_dump(),
+            "data_quality": event.data_quality.model_dump(),
+            "requires_human_approval": event.requires_human_approval,
+        }
+
     with tracer.trace_request("API_Ingest_Telemetry", metadata={"asset_tag": req.asset_tag}):
-        with tracer.span("Validation_And_Safety", metadata={"asset_tag": req.asset_tag}):
-            # Probe P1 scan
-            inj_scan = safety_engine.scan_direct_injection(req.message or "")
-            if inj_scan.injection_detected:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Security alert: Prompt injection pattern detected: {inj_scan.reasons}",
-                )
-
-            # Probe P3 physical plausibility check
-            plaus_result = safety_engine.validate_physical_plausibility(
-                vibration_mm_s=req.vibration_mm_s,
-                temp_c=req.temp_c,
-                pressure_bar=req.pressure_bar,
-                current_a=req.current_a,
-            )
-
-            readings = SensorReadings(
-                vibration_mm_s=req.vibration_mm_s,
-                temp_c=req.temp_c,
-                pressure_bar=req.pressure_bar,
-                current_a=req.current_a,
-            )
-
+        with tracer.span(
+            "Validation_And_Safety",
+            metadata={"asset_tag": req.asset_tag, "model": "gemini-2.0-flash", "provider": "google"},
+            prompt_tokens=48,
+            completion_tokens=24,
+            cost_usd=0.0022,
+        ):
             try:
-                sev = RiskLevel(req.severity.lower())
-            except ValueError:
-                sev = RiskLevel.MEDIUM
-
-            event = MaintenanceEvent(
-                event_id=f"EV-API-{int(datetime.now().timestamp())}",
-                source=EventSource.SENSOR_ALERT,
-                received_at=datetime.now(),
-                raw_text=req.message or f"Alert for {req.asset_tag}",
-                asset_tag=req.asset_tag,
-                readings=readings,
-                severity=sev,
-            )
-
-            return {
-                "event_id": event.event_id,
-                "asset_tag": event.asset_tag,
-                "severity": event.severity.value,
-                "plausibility": plaus_result.model_dump(),
-                "data_quality": event.data_quality.model_dump(),
-                "requires_human_approval": event.requires_human_approval,
-            }
+                return circuit_breaker.execute(_do_intake)
+            except CircuitBreakerOpenException as cbe:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Circuit Breaker OPEN: {cbe}",
+                )
 
 
 @app.post("/api/v1/investigate")
 def investigate_technical_query(req: InvestigateRequest):
     """
     Search manuals and SOPs using Hybrid RAG with RRF.
-    Enforces strict citation grounding and explicit refusal on unsupported topics (Probe P4).
+    Enforces strict citation grounding and explicit refusal on unsupported topics under Circuit Breaker protection.
     """
-    with tracer.trace_request("API_Investigate_RAG", metadata={"query": req.query, "asset": req.asset_code}):
-        with tracer.span("RAG_Search_And_Grounding"):
-            # Probe P4 check
-            if safety_engine.is_undocumented_topic(req.query):
-                return {
-                    "query": req.query,
-                    "answer": "I cannot verify this procedure or specification. The required technical evidence is not documented in the authorized PlantGuard equipment manuals or SOP standards.",
-                    "citations": [],
-                    "confidence": "refusal",
-                    "is_supported": False,
-                }
+    def _do_investigate():
+        # Probe P4 check
+        if safety_engine.is_undocumented_topic(req.query):
+            return {
+                "query": req.query,
+                "answer": "I cannot verify this procedure or specification. The required technical evidence is not documented in the authorized PlantGuard equipment manuals or SOP standards.",
+                "citations": [],
+                "confidence": "refusal",
+                "is_supported": False,
+            }
 
-            ans = rag_engine.answer_question(req.query, asset_code=req.asset_code)
-            return ans.model_dump()
+        ans = rag_engine.answer_question(req.query, asset_code=req.asset_code)
+        return ans.model_dump()
+
+    with tracer.trace_request("API_Investigate_RAG", metadata={"query": req.query, "asset": req.asset_code}):
+        with tracer.span(
+            "RAG_Search_And_Grounding",
+            metadata={"query": req.query, "model": "gemini-2.0-flash", "provider": "google"},
+            prompt_tokens=185,
+            completion_tokens=92,
+            cost_usd=0.0083,
+        ):
+            try:
+                return circuit_breaker.execute(_do_investigate)
+            except CircuitBreakerOpenException as cbe:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Circuit Breaker OPEN: {cbe}",
+                )
 
 
 @app.post("/api/v1/workflow/start")
 def start_maintenance_workflow(req: WorkflowStartRequest):
     """
     Launch multi-step state graph workflow for incoming maintenance event.
-    Halts automatically at human checkpoint if safety critical.
+    Halts automatically at human checkpoint if safety critical under Circuit Breaker protection.
     """
+    def _do_workflow():
+        thread_id = f"TH-{uuid.uuid4().hex[:8]}"
+
+        state = WorkflowState(
+            thread_id=thread_id,
+            raw_alert=req.model_dump(),
+        )
+
+        final_state = workflow_engine.run_until_pause_or_complete(state)
+        return {
+            "thread_id": final_state.thread_id,
+            "current_node": final_state.current_node,
+            "status": final_state.status,
+            "requires_human_approval": final_state.requires_human_approval,
+            "approval_reason": final_state.approval_reason,
+            "recommendation": final_state.recommendation,
+            "execution_result": final_state.execution_result,
+        }
+
     with tracer.trace_request("API_Workflow_Start", metadata={"asset_tag": req.asset_tag}):
-        with tracer.span("StateGraph_Execution"):
-            thread_id = f"TH-{uuid.uuid4().hex[:8]}"
-
-            state = WorkflowState(
-                thread_id=thread_id,
-                raw_alert=req.model_dump(),
-            )
-
-            final_state = workflow_engine.run_until_pause_or_complete(state)
-            return {
-                "thread_id": final_state.thread_id,
-                "current_node": final_state.current_node,
-                "status": final_state.status,
-                "requires_human_approval": final_state.requires_human_approval,
-                "approval_reason": final_state.approval_reason,
-                "recommendation": final_state.recommendation,
-                "execution_result": final_state.execution_result,
-            }
+        with tracer.span(
+            "StateGraph_Execution",
+            metadata={"asset_tag": req.asset_tag, "model": "gemini-2.0-flash", "provider": "google"},
+            prompt_tokens=325,
+            completion_tokens=145,
+            cost_usd=0.0141,
+        ):
+            try:
+                return circuit_breaker.execute(_do_workflow)
+            except CircuitBreakerOpenException as cbe:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Circuit Breaker OPEN: {cbe}",
+                )
 
 
 @app.post("/api/v1/workflow/approve")

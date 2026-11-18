@@ -45,8 +45,8 @@ class TeamSupervisor:
         self.mcp_client = mcp_client or PlantGuardMCPClient()
         self.intake_agent = IntakeAgent(self.adapter)
         self.rag_agent = RAGAgent()
-        self.recommendation_agent = RecommendationAgent()
-        self.procurement_agent = ProcurementAgent()
+        self.recommendation_agent = RecommendationAgent(mcp_client=self.mcp_client)
+        self.procurement_agent = ProcurementAgent(mcp_client=self.mcp_client)
         self.safety_agent = SafetyAgent()
 
     def run_collaborative_workflow(
