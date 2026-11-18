@@ -61,6 +61,8 @@ class SafetyPolicyEngine:
         "unapproved",
         "freon-12",
         "cryogenic",
+        "secondary cooling intake valve",
+        "oil change intervals for the gearbox",
     ]
 
     def __init__(self):

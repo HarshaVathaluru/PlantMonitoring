@@ -380,6 +380,111 @@ class PersistentMemoryManager:
             """, (session_id, identity_id))
             return [{"role": r["role"], "content": r["content"]} for r in cursor.fetchall()]
 
+    # ── Semantic Vector Document Index (M3 Advanced Item) ──
+
+    def init_semantic_index(self, corpus_chunks: Optional[List[Any]] = None) -> None:
+        """Initialize semantic vector index for manuals and SOPs with rich metadata."""
+        from app.rag.engine import DenseVectorIndex, DocumentChunk
+        self._semantic_index = DenseVectorIndex()
+        if corpus_chunks:
+            self._semantic_index.fit(corpus_chunks)
+        else:
+            settings = get_settings()
+            md_dir = settings.DATA_DIR / "corpus" / "markdown"
+            chunks = []
+            if md_dir.exists():
+                import re
+                for file_path in sorted(md_dir.glob("*.md")):
+                    slug = file_path.stem
+                    text = file_path.read_text(encoding="utf-8")
+                    asset_code = slug.replace("manual-", "").upper() if slug.startswith("manual-") else None
+                    sections = re.split(r"\n(?=#{1,3}\s+)", text)
+                    for idx, section_text in enumerate(sections):
+                        section_text = section_text.strip()
+                        if not section_text:
+                            continue
+                        first_line = section_text.splitlines()[0]
+                        sec_title = first_line.lstrip("#").strip() if first_line.startswith("#") else f"Section {idx+1}"
+                        chunks.append(
+                            DocumentChunk(
+                                chunk_id=f"{slug}-sec{idx+1:02d}",
+                                doc_slug=slug,
+                                doc_title=slug.replace("-", " ").title(),
+                                section=sec_title,
+                                asset_code=asset_code,
+                                content=section_text,
+                                char_count=len(section_text),
+                            )
+                        )
+            self._semantic_index.fit(chunks)
+
+    def search_semantic(self, query: str, top_k: int = 5, asset_code: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Semantic vector retrieval over indexed manuals and SOPs with metadata filtering."""
+        if not hasattr(self, "_semantic_index") or self._semantic_index is None:
+            self.init_semantic_index()
+
+        matches = self._semantic_index.search(query, top_k=top_k * 2)
+        filtered = []
+        for chunk, score in matches:
+            if asset_code and chunk.asset_code and chunk.asset_code != asset_code:
+                continue
+            filtered.append({
+                "chunk_id": chunk.chunk_id,
+                "doc_slug": chunk.doc_slug,
+                "doc_title": chunk.doc_title,
+                "section": chunk.section,
+                "asset_code": chunk.asset_code,
+                "score": round(score, 4),
+                "preview": chunk.content[:200],
+            })
+            if len(filtered) >= top_k:
+                break
+        return filtered
+
+    # ── Privacy Retention & Deletion Controls (M3 Advanced Item) ──
+
+    def purge_identity_data(self, identity_id: str) -> Dict[str, int]:
+        """Purge all stored facts, history, and session messages for an identity (GDPR/compliance)."""
+        counts = {}
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM asset_facts WHERE identity_id = ?", (identity_id,))
+            counts["deleted_facts"] = cursor.rowcount
+
+            cursor.execute("DELETE FROM maintenance_history WHERE identity_id = ?", (identity_id,))
+            counts["deleted_history"] = cursor.rowcount
+
+            cursor.execute("DELETE FROM session_messages WHERE identity_id = ?", (identity_id,))
+            counts["deleted_messages"] = cursor.rowcount
+            conn.commit()
+        return counts
+
+    def summarize_and_trim_session(self, session_id: str, token_budget: int = 500) -> str:
+        """Create a rolling summary of older messages and trim history to fit token budget."""
+        history = self.get_session_history(session_id)
+        if not history:
+            return ""
+
+        total_words = sum(len(m["content"].split()) for m in history)
+        approx_tokens = int(total_words * 1.3)
+
+        if approx_tokens > token_budget:
+            # Create rolling summary of early messages
+            early_msgs = history[: len(history) // 2]
+            summary_text = "Prior conversation summary: " + "; ".join(f"{m['role']}: {m['content'][:60]}..." for m in early_msgs)
+            # Retain only recent messages
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    DELETE FROM session_messages
+                    WHERE session_id = ? AND msg_id IN (
+                        SELECT msg_id FROM session_messages WHERE session_id = ? ORDER BY msg_id ASC LIMIT ?
+                    )
+                """, (session_id, session_id, len(early_msgs)))
+                conn.commit()
+            return summary_text
+        return ""
+
     def close(self) -> None:
         """Close connections."""
         pass

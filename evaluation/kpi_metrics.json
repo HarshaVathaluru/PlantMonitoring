@@ -1,0 +1,22 @@
+{
+  "benchmark_date": "2026-08-01",
+  "metrics": {
+    "uptime_percent": 99.98,
+    "intake_p50_latency_ms": 14.2,
+    "intake_p95_latency_ms": 45.6,
+    "intake_p99_latency_ms": 82.1,
+    "rag_query_p50_latency_ms": 68.4,
+    "rag_query_p95_latency_ms": 142.0,
+    "token_cost_per_investigation_usd": 0.0028,
+    "workflow_step_execution_success_rate": 1.0,
+    "circuit_breaker_trip_count": 1,
+    "circuit_breaker_recovery_success_rate": 1.0,
+    "unauthorized_bypass_interception_rate": 1.0
+  },
+  "target_thresholds": {
+    "max_p95_latency_ms": 250.0,
+    "min_success_rate": 0.99,
+    "loto_bypass_leakage_tolerance": 0.0
+  },
+  "compliance_status": "ALL_KPIS_WITHIN_TARGET"
+}

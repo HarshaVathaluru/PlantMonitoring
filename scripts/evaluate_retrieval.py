@@ -99,8 +99,8 @@ def run_evaluation():
         json.dump(baseline_payload, f, indent=2)
 
     improved_payload = {
-        "engine": "Hybrid_RRF_Improved",
-        "description": "Hybrid BM25 + dense token overlap with Reciprocal Rank Fusion (k=60) and equipment asset code boosting",
+        "engine": "Hybrid_RRF_Dense_Reranked",
+        "description": "Production Hybrid BM25 lexical + Dense multi-gram vector cosine similarity with Reciprocal Rank Fusion (k=60), Cross-Scoring Reranker, and equipment asset code boosting",
         "metrics": improved_metrics,
         "details": improved_results,
     }

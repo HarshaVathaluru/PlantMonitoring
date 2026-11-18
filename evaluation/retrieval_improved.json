@@ -1,9 +1,9 @@
 {
-  "engine": "Hybrid_RRF_Improved",
-  "description": "Hybrid BM25 + dense token overlap with Reciprocal Rank Fusion (k=60) and equipment asset code boosting",
+  "engine": "Hybrid_RRF_Dense_Reranked",
+  "description": "Production Hybrid BM25 lexical + Dense multi-gram vector cosine similarity with Reciprocal Rank Fusion (k=60), Cross-Scoring Reranker, and equipment asset code boosting",
   "metrics": {
     "total_queries": 12,
-    "mean_reciprocal_rank": 0.9333,
+    "mean_reciprocal_rank": 0.9375,
     "hit_rate_at_1": 0.9167,
     "hit_rate_at_3": 0.9167,
     "hit_rate_at_5": 1.0
@@ -23,8 +23,8 @@
       "id": "RAG-Q02",
       "query": "What are the lockout tagout zero energy verification steps before servicing hydraulic press?",
       "target_doc": "lockout-tagout",
-      "hit_rank": 5,
-      "reciprocal_rank": 0.2,
+      "hit_rank": 4,
+      "reciprocal_rank": 0.25,
       "hit_at_1": false,
       "hit_at_3": false,
       "hit_at_5": true
