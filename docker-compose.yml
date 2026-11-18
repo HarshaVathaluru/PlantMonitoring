@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  plantguard:
+    build: .
+    container_name: plantguard-copilot
+    ports:
+      - "8000:8000"
+    environment:
+      - PLANTGUARD_LLM_PROVIDER=gemini
+      - PLANTGUARD_LLM_MODEL=gemini-3.1-flash-lite
+      - PLANTGUARD_REFERENCE_DATE=2026-08-01
+      - PLANTGUARD_GEMINI_API_KEY=${PLANTGUARD_GEMINI_API_KEY:-}
+    volumes:
+      - ./evaluation:/app/evaluation
+      - ./plantguard_checkpoints.db:/app/plantguard_checkpoints.db
+    restart: unless-stopped

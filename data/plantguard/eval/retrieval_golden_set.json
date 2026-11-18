@@ -1,0 +1,86 @@
+[
+  {
+    "id": "RAG-Q01",
+    "query": "What is the bearing replacement torque spec for the AIR-COMP rotary screw compressor?",
+    "asset_code": "AIR-COMP",
+    "target_doc": "manual-air-comp",
+    "target_keywords": ["torque", "bearing", "compressor", "nm"]
+  },
+  {
+    "id": "RAG-Q02",
+    "query": "What are the lockout tagout zero energy verification steps before servicing hydraulic press?",
+    "asset_code": "HYD-PRESS",
+    "target_doc": "lockout-tagout",
+    "target_keywords": ["energy", "isolation", "zero", "tagout", "pressure"]
+  },
+  {
+    "id": "RAG-Q03",
+    "query": "Who has authority to approve spare parts procurement purchase order above 200,000 INR?",
+    "asset_code": null,
+    "target_doc": "spares-procurement",
+    "target_keywords": ["procurement", "approval", "200,000", "manager", "head"]
+  },
+  {
+    "id": "RAG-Q04",
+    "query": "What is the maximum allowable vibration threshold trip limit for the centrifugal pump PUMP-CENT?",
+    "asset_code": "PUMP-CENT",
+    "target_doc": "manual-pump-cent",
+    "target_keywords": ["vibration", "trip", "threshold", "pump"]
+  },
+  {
+    "id": "RAG-Q05",
+    "query": "What are the mandatory permit to work requirements for hot work and confined space entry?",
+    "asset_code": null,
+    "target_doc": "permit-to-work",
+    "target_keywords": ["permit", "hot work", "confined space", "safety"]
+  },
+  {
+    "id": "RAG-Q06",
+    "query": "What is the operating surface temperature trip limit for industrial oven IND-OVEN?",
+    "asset_code": "IND-OVEN",
+    "target_doc": "manual-ind-oven",
+    "target_keywords": ["temperature", "trip", "oven", "celsius"]
+  },
+  {
+    "id": "RAG-Q07",
+    "query": "What is the conveyor belt tensioning procedure and pulley alignment check?",
+    "asset_code": "CONV-BELT",
+    "target_doc": "manual-conv-belt",
+    "target_keywords": ["tension", "pulley", "belt", "alignment"]
+  },
+  {
+    "id": "RAG-Q08",
+    "query": "How should an operator respond to a high-priority Priority 1 critical alarm?",
+    "asset_code": null,
+    "target_doc": "alarm-response",
+    "target_keywords": ["alarm", "priority", "escalation", "emergency", "response"]
+  },
+  {
+    "id": "RAG-Q09",
+    "query": "What is the axis calibration and servo motor inspection schedule for ROBOT-WELD?",
+    "asset_code": "ROBOT-WELD",
+    "target_doc": "manual-robot-weld",
+    "target_keywords": ["axis", "calibration", "servo", "robot", "weld"]
+  },
+  {
+    "id": "RAG-Q10",
+    "query": "What is the chiller refrigerant leak inspection procedure and operating pressure?",
+    "asset_code": "CHILLER",
+    "target_doc": "manual-chiller",
+    "target_keywords": ["chiller", "refrigerant", "leak", "pressure"]
+  },
+  {
+    "id": "RAG-Q11",
+    "query": "What spindle speed limits and backlash tolerances apply to the CNC milling center CNC-MILL?",
+    "asset_code": "CNC-MILL",
+    "target_doc": "manual-cnc-mill",
+    "target_keywords": ["spindle", "backlash", "cnc", "milling"]
+  },
+  {
+    "id": "RAG-Q12",
+    "query": "What are the weekly preventive maintenance planning routines and backlog tracking rules?",
+    "asset_code": null,
+    "target_doc": "maintenance-planning",
+    "target_keywords": ["planning", "preventive", "backlog", "schedule"]
+  }
+]
