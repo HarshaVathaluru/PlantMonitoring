@@ -137,3 +137,60 @@ def test_failure_injection_reliability_comparison():
     protected_availability = successes / total_calls
     assert protected_availability == 1.0
     assert cb.get_state() == CircuitState.OPEN
+
+
+def test_fastapi_request_level_tracing_and_kpis(tmp_path):
+    from app.main import (
+        IntakeRequest,
+        InvestigateRequest,
+        health_check,
+        ingest_telemetry_alert,
+        investigate_technical_query,
+        tracer,
+    )
+
+    # Temporarily set trace_dir to tmp_path
+    original_trace_dir = tracer.trace_dir
+    tracer.trace_dir = tmp_path
+    try:
+        # 1. Health check call
+        resp_health = health_check()
+        assert resp_health["status"] == "HEALTHY"
+
+        # 2. Ingest telemetry call
+        req_intake = IntakeRequest(
+            asset_tag="VPW-AIR-COMP-01",
+            vibration_mm_s=4.5,
+            temp_c=62.0,
+            severity="medium",
+        )
+        resp_ingest = ingest_telemetry_alert(req_intake)
+        assert resp_ingest["asset_tag"] == "VPW-AIR-COMP-01"
+
+        # 3. Investigate query call
+        req_inv = InvestigateRequest(query="What is the trip threshold for vibration on 400-Tonne Hydraulic Press?")
+        resp_inv = investigate_technical_query(req_inv)
+        assert resp_inv["is_supported"] is True
+
+        # Verify that actual request trace files were generated
+        trace_files = list(tmp_path.glob("TR-*.json"))
+        assert len(trace_files) >= 2, f"Expected at least 2 traces, found {len(trace_files)}"
+
+        # Verify trace structure
+        sample_file = trace_files[0]
+        data = json.loads(sample_file.read_text(encoding="utf-8"))
+        assert "trace_id" in data
+        assert "spans" in data
+        assert len(data["spans"]) >= 1
+        assert any("Validation_And_Safety" in s["name"] or "RAG" in s["name"] for s in data["spans"])
+
+        # Verify dynamic KPI computation
+        kpis = tracer.compute_dynamic_kpis()
+        assert "metrics" in kpis
+        assert kpis["total_recorded_traces"] >= 2
+        assert kpis["metrics"]["uptime_percent"] > 99.0
+        assert "intake_p50_latency_ms" in kpis["metrics"]
+    finally:
+        tracer.trace_dir = original_trace_dir
+
+

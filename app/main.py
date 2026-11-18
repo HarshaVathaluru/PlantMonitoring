@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -125,14 +127,8 @@ def get_circuit_breaker_status():
 
 @app.get("/api/v1/observability/kpis")
 def get_kpi_summary():
-    """Quantitative SLA and reliability KPIs."""
-    import json
-    from pathlib import Path
-    kpi_file = Path("evaluation") / "kpi_metrics.json"
-    if kpi_file.exists():
-        with open(kpi_file, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"status": "INITIALIZED", "metrics": {"uptime_percent": 99.98}}
+    """Quantitative SLA and reliability KPIs computed dynamically across recorded traces."""
+    return tracer.compute_dynamic_kpis()
 
 
 @app.get("/api/v1/observability/traces")
@@ -157,53 +153,54 @@ def ingest_telemetry_alert(req: IntakeRequest):
     Ingest, validate, and parse telemetry alert.
     Applies physical plausibility and prompt injection scans.
     """
-    with tracer.span("API_Ingest_Telemetry", metadata={"asset_tag": req.asset_tag}):
-        # Probe P1 scan
-        inj_scan = safety_engine.scan_direct_injection(req.message or "")
-        if inj_scan.injection_detected:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Security alert: Prompt injection pattern detected: {inj_scan.reasons}",
+    with tracer.trace_request("API_Ingest_Telemetry", metadata={"asset_tag": req.asset_tag}):
+        with tracer.span("Validation_And_Safety", metadata={"asset_tag": req.asset_tag}):
+            # Probe P1 scan
+            inj_scan = safety_engine.scan_direct_injection(req.message or "")
+            if inj_scan.injection_detected:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Security alert: Prompt injection pattern detected: {inj_scan.reasons}",
+                )
+
+            # Probe P3 physical plausibility check
+            plaus_result = safety_engine.validate_physical_plausibility(
+                vibration_mm_s=req.vibration_mm_s,
+                temp_c=req.temp_c,
+                pressure_bar=req.pressure_bar,
+                current_a=req.current_a,
             )
 
-        # Probe P3 physical plausibility check
-        plaus_result = safety_engine.validate_physical_plausibility(
-            vibration_mm_s=req.vibration_mm_s,
-            temp_c=req.temp_c,
-            pressure_bar=req.pressure_bar,
-            current_a=req.current_a,
-        )
+            readings = SensorReadings(
+                vibration_mm_s=req.vibration_mm_s,
+                temp_c=req.temp_c,
+                pressure_bar=req.pressure_bar,
+                current_a=req.current_a,
+            )
 
-        readings = SensorReadings(
-            vibration_mm_s=req.vibration_mm_s,
-            temp_c=req.temp_c,
-            pressure_bar=req.pressure_bar,
-            current_a=req.current_a,
-        )
+            try:
+                sev = RiskLevel(req.severity.lower())
+            except ValueError:
+                sev = RiskLevel.MEDIUM
 
-        try:
-            sev = RiskLevel(req.severity.lower())
-        except ValueError:
-            sev = RiskLevel.MEDIUM
+            event = MaintenanceEvent(
+                event_id=f"EV-API-{int(datetime.now().timestamp())}",
+                source=EventSource.SENSOR_ALERT,
+                received_at=datetime.now(),
+                raw_text=req.message or f"Alert for {req.asset_tag}",
+                asset_tag=req.asset_tag,
+                readings=readings,
+                severity=sev,
+            )
 
-        event = MaintenanceEvent(
-            event_id=f"EV-API-{int(datetime.now().timestamp())}",
-            source=EventSource.SENSOR_ALERT,
-            received_at=datetime.now(),
-            raw_text=req.message or f"Alert for {req.asset_tag}",
-            asset_tag=req.asset_tag,
-            readings=readings,
-            severity=sev,
-        )
-
-        return {
-            "event_id": event.event_id,
-            "asset_tag": event.asset_tag,
-            "severity": event.severity.value,
-            "plausibility": plaus_result.model_dump(),
-            "data_quality": event.data_quality.model_dump(),
-            "requires_human_approval": event.requires_human_approval,
-        }
+            return {
+                "event_id": event.event_id,
+                "asset_tag": event.asset_tag,
+                "severity": event.severity.value,
+                "plausibility": plaus_result.model_dump(),
+                "data_quality": event.data_quality.model_dump(),
+                "requires_human_approval": event.requires_human_approval,
+            }
 
 
 @app.post("/api/v1/investigate")
@@ -212,19 +209,20 @@ def investigate_technical_query(req: InvestigateRequest):
     Search manuals and SOPs using Hybrid RAG with RRF.
     Enforces strict citation grounding and explicit refusal on unsupported topics (Probe P4).
     """
-    with tracer.span("API_Investigate_RAG", metadata={"query": req.query, "asset": req.asset_code}):
-        # Probe P4 check
-        if safety_engine.is_undocumented_topic(req.query):
-            return {
-                "query": req.query,
-                "answer": "I cannot verify this procedure or specification. The required technical evidence is not documented in the authorized PlantGuard equipment manuals or SOP standards.",
-                "citations": [],
-                "confidence": "refusal",
-                "is_supported": False,
-            }
+    with tracer.trace_request("API_Investigate_RAG", metadata={"query": req.query, "asset": req.asset_code}):
+        with tracer.span("RAG_Search_And_Grounding"):
+            # Probe P4 check
+            if safety_engine.is_undocumented_topic(req.query):
+                return {
+                    "query": req.query,
+                    "answer": "I cannot verify this procedure or specification. The required technical evidence is not documented in the authorized PlantGuard equipment manuals or SOP standards.",
+                    "citations": [],
+                    "confidence": "refusal",
+                    "is_supported": False,
+                }
 
-        ans = rag_engine.answer_question(req.query, asset_code=req.asset_code)
-        return ans.model_dump()
+            ans = rag_engine.answer_question(req.query, asset_code=req.asset_code)
+            return ans.model_dump()
 
 
 @app.post("/api/v1/workflow/start")
@@ -233,25 +231,25 @@ def start_maintenance_workflow(req: WorkflowStartRequest):
     Launch multi-step state graph workflow for incoming maintenance event.
     Halts automatically at human checkpoint if safety critical.
     """
-    with tracer.span("API_Workflow_Start", metadata={"asset_tag": req.asset_tag}):
-        import uuid
-        thread_id = f"TH-{uuid.uuid4().hex[:8]}"
+    with tracer.trace_request("API_Workflow_Start", metadata={"asset_tag": req.asset_tag}):
+        with tracer.span("StateGraph_Execution"):
+            thread_id = f"TH-{uuid.uuid4().hex[:8]}"
 
-        state = WorkflowState(
-            thread_id=thread_id,
-            raw_alert=req.model_dump(),
-        )
+            state = WorkflowState(
+                thread_id=thread_id,
+                raw_alert=req.model_dump(),
+            )
 
-        final_state = workflow_engine.run_until_pause_or_complete(state)
-        return {
-            "thread_id": final_state.thread_id,
-            "current_node": final_state.current_node,
-            "status": final_state.status,
-            "requires_human_approval": final_state.requires_human_approval,
-            "approval_reason": final_state.approval_reason,
-            "recommendation": final_state.recommendation,
-            "execution_result": final_state.execution_result,
-        }
+            final_state = workflow_engine.run_until_pause_or_complete(state)
+            return {
+                "thread_id": final_state.thread_id,
+                "current_node": final_state.current_node,
+                "status": final_state.status,
+                "requires_human_approval": final_state.requires_human_approval,
+                "approval_reason": final_state.approval_reason,
+                "recommendation": final_state.recommendation,
+                "execution_result": final_state.execution_result,
+            }
 
 
 @app.post("/api/v1/workflow/approve")
@@ -260,22 +258,24 @@ def approve_workflow(req: WorkflowApprovalRequest):
     Deliver human approval or rejection to a paused workflow.
     Resumes durable execution from SQLite checkpoint.
     """
-    try:
-        resumed_state = workflow_engine.resume_approval(
-            thread_id=req.thread_id,
-            decision=req.decision,
-            role=req.role,
-            comments=req.comments,
-        )
-        return {
-            "thread_id": resumed_state.thread_id,
-            "status": resumed_state.status,
-            "current_node": resumed_state.current_node,
-            "execution_completed": resumed_state.execution_completed,
-            "execution_result": resumed_state.execution_result,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    with tracer.trace_request("API_Workflow_Approve", metadata={"thread_id": req.thread_id}):
+        with tracer.span("StateGraph_Resume"):
+            try:
+                resumed_state = workflow_engine.resume_approval(
+                    thread_id=req.thread_id,
+                    decision=req.decision,
+                    role=req.role,
+                    comments=req.comments,
+                )
+                return {
+                    "thread_id": resumed_state.thread_id,
+                    "status": resumed_state.status,
+                    "current_node": resumed_state.current_node,
+                    "execution_completed": resumed_state.execution_completed,
+                    "execution_result": resumed_state.execution_result,
+                }
+            except Exception as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @app.get("/api/v1/workflow/{thread_id}")
@@ -605,6 +605,3 @@ def render_dashboard():
     </body>
     </html>
     """
-
-
-from datetime import datetime

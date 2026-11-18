@@ -100,8 +100,100 @@ Rules:
 """
 
 
+def handle_jsonrpc_request(req_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute JSON-RPC 2.0 requests across MCP transport boundary."""
+    method = req_data.get("method")
+    req_id = req_data.get("id", 1)
+    params = req_data.get("params", {})
+
+    if method == "tools/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "tools": [
+                    {
+                        "name": "check_spare_parts_inventory",
+                        "description": "Check stock level, reorder point, unit cost, and supplier tier for a spare part.",
+                        "inputSchema": {"type": "object", "properties": {"part_number": {"type": "string"}}, "required": ["part_number"]},
+                    },
+                    {
+                        "name": "get_supplier_info",
+                        "description": "Retrieve vendor contact details, lead time, and reliability tier by supplier ID.",
+                        "inputSchema": {"type": "object", "properties": {"supplier_id": {"type": "string"}}, "required": ["supplier_id"]},
+                    },
+                    {
+                        "name": "calculate_downtime_cost",
+                        "description": "Calculate financial impact of equipment downtime using asset-specific hourly rate.",
+                        "inputSchema": {"type": "object", "properties": {"asset_tag": {"type": "string"}, "downtime_minutes": {"type": "integer"}}, "required": ["asset_tag"]},
+                    },
+                ]
+            },
+        }
+
+    if method == "resources/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "resources": [
+                    {
+                        "uri": "plantguard://policies/procurement_approval_matrix",
+                        "name": "Procurement Approval Matrix",
+                        "mimeType": "text/markdown",
+                    }
+                ]
+            },
+        }
+
+    if method == "resources/read":
+        uri = params.get("uri")
+        if uri == "plantguard://policies/procurement_approval_matrix":
+            content = get_procurement_approval_matrix()
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"contents": [{"uri": uri, "mimeType": "text/markdown", "text": content}]},
+            }
+        return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": f"Resource not found: {uri}"}}
+
+    if method == "tools/call":
+        name = params.get("name")
+        args = params.get("arguments", {})
+        if name == "check_spare_parts_inventory":
+            res = check_spare_parts_inventory(args.get("part_number", ""))
+        elif name == "get_supplier_info":
+            res = get_supplier_info(args.get("supplier_id", ""))
+        elif name == "calculate_downtime_cost":
+            res = calculate_downtime_cost(args.get("asset_tag", ""), int(args.get("downtime_minutes", 60)))
+        else:
+            return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": f"Method/Tool {name} not found"}}
+
+        return {"jsonrpc": "2.0", "id": req_id, "result": res}
+
+    return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": f"Unknown method: {method}"}}
+
+
 def main():
-    """Run the MCP server over stdio transport."""
+    """Run the MCP server over stdio or JSON-RPC transport."""
+    import argparse
+    import json
+    parser = argparse.ArgumentParser(description="PlantGuard FastMCP Server")
+    parser.add_argument("--jsonrpc", type=str, help="Single JSON-RPC request to execute and return output to stdout")
+    parser.add_argument("--stdio", action="store_true", help="Run standard stdio loop")
+    args = parser.parse_args()
+
+    if args.jsonrpc:
+        try:
+            req_data = json.loads(args.jsonrpc)
+            resp = handle_jsonrpc_request(req_data)
+            print(json.dumps(resp))
+            sys.exit(0)
+        except Exception as e:
+            err_resp = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": str(e)}}
+            print(json.dumps(err_resp))
+            sys.exit(1)
+
     logger.info("Starting PlantGuard MCP Server over stdio...")
     mcp_server.run()
 

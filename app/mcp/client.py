@@ -1,17 +1,19 @@
 """PlantGuard Production MCP Client for Milestone 6 (Level 4 Implementation).
 
 Provides real Model Context Protocol (MCP) transport support:
-1. Stdio JSON-RPC framing with subprocess transport
+1. Subprocess stdio JSON-RPC framing crossing the operating system process boundary
 2. Tool invocation ('check_spare_parts_inventory', 'get_supplier_info', 'calculate_downtime_cost')
 3. Resource reading ('plantguard://policies/procurement_approval_matrix')
-4. Robust transport logging and protocol frame auditing.
+4. Complete separation: Client has zero local imports of maintenance tools; execution occurs exclusively on the MCP server process.
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.config.settings import get_settings
@@ -20,139 +22,104 @@ logger = logging.getLogger("plantguard.mcp.client")
 
 
 class PlantGuardMCPClient:
-    """Production client for interacting with the PlantGuard MCP Server."""
+    """Production client for interacting with the PlantGuard MCP Server across a transport boundary."""
 
     def __init__(self, use_stdio: bool = True):
         self.use_stdio = use_stdio
         self.settings = get_settings()
 
+    def _send_transport_frame(self, rpc_request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Dispatches a JSON-RPC 2.0 protocol frame across the operating system process boundary
+        to the PlantGuard MCP Server.
+        """
+        req_str = json.dumps(rpc_request)
+        logger.info(f"[MCP TRANSPORT -> OUTBOUND] {req_str}")
+
+        cmd = [
+            sys.executable,
+            "-m",
+            "app.mcp.server",
+            "--jsonrpc",
+            req_str,
+        ]
+
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            env={"PYTHONPATH": ".", **dict(os.environ)},
+            timeout=15,
+        )
+
+        if proc.returncode != 0:
+            logger.error(f"[MCP TRANSPORT ERROR] Subprocess exited with code {proc.returncode}: {proc.stderr}")
+            raise RuntimeError(f"MCP server process error: {proc.stderr}")
+
+        stdout_clean = proc.stdout.strip()
+        logger.info(f"[MCP TRANSPORT <- INBOUND] {stdout_clean}")
+
+        try:
+            resp = json.loads(stdout_clean)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Malformed JSON-RPC response from MCP transport: {stdout_clean}") from e
+
+        if "error" in resp:
+            err = resp["error"]
+            raise RuntimeError(f"MCP Protocol Error: {err.get('message', str(err))}")
+
+        return resp.get("result", {})
+
     def list_tools(self) -> List[Dict[str, Any]]:
-        """List all tools registered on the PlantGuard MCP server."""
-        return [
-            {
-                "name": "check_spare_parts_inventory",
-                "description": "Check stock level, reorder point, unit cost, and supplier tier for a spare part.",
-                "parameters": {"part_number": "string"},
-            },
-            {
-                "name": "get_supplier_info",
-                "description": "Retrieve vendor contact details, lead time, and reliability tier by supplier ID.",
-                "parameters": {"supplier_id": "string"},
-            },
-            {
-                "name": "calculate_downtime_cost",
-                "description": "Calculate financial impact of equipment downtime using asset-specific hourly rate.",
-                "parameters": {"asset_tag": "string", "downtime_minutes": "integer"},
-            },
-        ]
-
-    def list_resources(self) -> List[Dict[str, str]]:
-        """List all resources exposed by the MCP server."""
-        return [
-            {
-                "uri": "plantguard://policies/procurement_approval_matrix",
-                "name": "Procurement Approval Matrix",
-                "mimeType": "text/markdown",
-            }
-        ]
-
-    def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Execute an MCP tool call across the MCP protocol boundary.
-        Logs JSON-RPC request and response protocol frames.
-        """
+        """List all tools registered on the PlantGuard MCP server across transport boundary."""
         rpc_request = {
             "jsonrpc": "2.0",
             "id": 1,
+            "method": "tools/list",
+            "params": {},
+        }
+        res = self._send_transport_frame(rpc_request)
+        return res.get("tools", [])
+
+    def list_resources(self) -> List[Dict[str, str]]:
+        """List all resources exposed by the MCP server across transport boundary."""
+        rpc_request = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "resources/list",
+            "params": {},
+        }
+        res = self._send_transport_frame(rpc_request)
+        return res.get("resources", [])
+
+    def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute an MCP tool call across the MCP transport protocol boundary.
+        Executes on the child MCP server process, returning parsed results.
+        """
+        rpc_request = {
+            "jsonrpc": "2.0",
+            "id": 10,
             "method": "tools/call",
             "params": {
                 "name": tool_name,
                 "arguments": arguments,
             },
         }
-        logger.info(f"[MCP TRANSPORT -> OUTBOUND] {json.dumps(rpc_request)}")
-
-        # Execute tool via authoritative tools module
-        from app.tools.maintenance_tools import (
-            calculate_downtime_cost as tool_calc_downtime,
-            check_spare_parts_inventory as tool_check_inventory,
-            TableDataLoader,
-        )
-
-        if tool_name == "check_spare_parts_inventory":
-            part_no = arguments.get("part_number", "")
-            res = tool_check_inventory(part_no).model_dump(mode="json")
-        elif tool_name == "get_supplier_info":
-            loader = TableDataLoader()
-            suppliers = loader.load_table("suppliers")
-            query_id = str(arguments.get("supplier_id", "")).strip().upper()
-            matched = None
-            for s in suppliers:
-                s_id = str(s.get("supplier_id", "")).upper()
-                if s_id == query_id or s_id.replace("VPW-", "") == query_id.replace("VPW-", ""):
-                    matched = {
-                        "supplier_id": s_id,
-                        "name": s.get("supplier_name") or s.get("name", "Unknown Supplier"),
-                        "tier": s.get("tier"),
-                        "city": s.get("city"),
-                        "lead_time_days": s.get("lead_time_days"),
-                        "status": "ACTIVE",
-                    }
-                    break
-            res = matched or {
-                "supplier_id": query_id,
-                "status": "NOT_FOUND",
-                "error": f"Supplier {query_id} not registered in authorized vendor roster",
-            }
-        elif tool_name == "calculate_downtime_cost":
-            asset_tag = arguments.get("asset_tag", "")
-            downtime_minutes = int(arguments.get("downtime_minutes", 60))
-            res = tool_calc_downtime(asset_tag, downtime_minutes).model_dump(mode="json")
-        else:
-            raise ValueError(f"Unknown MCP tool: {tool_name}")
-
-        rpc_response = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": res,
-        }
-        logger.info(f"[MCP TRANSPORT <- INBOUND] {json.dumps(rpc_response)}")
-        return res
+        return self._send_transport_frame(rpc_request)
 
     def read_resource(self, uri: str) -> str:
         """
-        Read an MCP resource by URI across the MCP protocol boundary.
-        Logs JSON-RPC resource read request and response.
+        Read an MCP resource by URI across the MCP transport protocol boundary.
         """
         rpc_request = {
             "jsonrpc": "2.0",
-            "id": 2,
+            "id": 20,
             "method": "resources/read",
             "params": {"uri": uri},
         }
-        logger.info(f"[MCP TRANSPORT -> OUTBOUND] {json.dumps(rpc_request)}")
-
-        if uri == "plantguard://policies/procurement_approval_matrix":
-            content = f"""# PlantGuard Authoritative Procurement Approval Matrix
-Reference: Corporate Financial Authority Standard Cl-4.2
-Last Updated: 2026-08-01
-
-| Tier | Total PO Amount (INR) | Required Approval Authority | Workflow Routing |
-|------|-----------------------|-----------------------------|------------------|
-| 1    | <= {self.settings.PROCUREMENT_AUTO_MAX_INR:,} | Automated / System | `auto` |
-| 2    | {self.settings.PROCUREMENT_AUTO_MAX_INR + 1:,} to {self.settings.PROCUREMENT_MANAGER_MAX_INR:,} | Maintenance Manager | `maintenance_manager` |
-| 3    | > {self.settings.PROCUREMENT_MANAGER_MAX_INR:,} | Plant Head | `plant_head` |
-
-Rules:
-1. Under no circumstances may an automated agent issue a PO exceeding {self.settings.PROCUREMENT_AUTO_MAX_INR:,} INR without human sign-off.
-2. Emergency POs must be confirmed in writing within 24 hours of issuance.
-"""
-            rpc_response = {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "result": {"contents": [{"uri": uri, "mimeType": "text/markdown", "text": content}]},
-            }
-            logger.info(f"[MCP TRANSPORT <- INBOUND] {json.dumps(rpc_response)}")
-            return content
-        else:
-            raise ValueError(f"Resource not found: {uri}")
+        result = self._send_transport_frame(rpc_request)
+        contents = result.get("contents", [])
+        if contents and "text" in contents[0]:
+            return contents[0]["text"]
+        return ""

@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from app.config.settings import get_settings
@@ -122,10 +123,14 @@ class MaintenanceWorkflow:
         self,
         checkpointer: Optional[SQLiteCheckpointer] = None,
         rag_engine: Optional[HybridRAGEngine] = None,
+        graph_db_path: Optional[str] = None,
     ):
         self.settings = get_settings()
         self.checkpointer = checkpointer or SQLiteCheckpointer()
         self.rag_engine = rag_engine or HybridRAGEngine()
+        self.graph_db_path = graph_db_path or "plantguard_graph_checkpoints.db"
+        self._graph_conn = sqlite3.connect(self.graph_db_path, check_same_thread=False)
+        self.graph_checkpointer = SqliteSaver(self._graph_conn)
         self.graph = self._build_langgraph()
 
     def _build_langgraph(self):
@@ -179,10 +184,9 @@ class MaintenanceWorkflow:
         )
         builder.add_edge("execution", END)
 
-        # Compile with true interrupt before human approval gate
-        mem_checkpointer = MemorySaver()
+        # Compile with true interrupt before human approval gate backed by durable SqliteSaver
         compiled = builder.compile(
-            checkpointer=mem_checkpointer,
+            checkpointer=self.graph_checkpointer,
             interrupt_before=["human_approval"],
         )
         return compiled

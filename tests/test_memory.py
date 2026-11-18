@@ -152,3 +152,92 @@ def test_persistent_memory_t1_through_t9(temp_db_file):
     )
     assert stable_fact_after_filler is not None
     assert stable_fact_after_filler.fact_value == "CLASS_A_EXTREME"
+
+
+def test_working_memory_15_filler_turns_recall(temp_db_file):
+    """
+    Explicit verification of working memory budget policy (M3.C1):
+    Adds 15 filler conversation turns and proves that durable facts,
+    procedural memory, and trimmed context maintain strict integrity.
+    """
+    mem = PersistentMemoryManager(db_path=temp_db_file)
+    session_id = "shift_handover_sess_01"
+
+    # Step 1: Store stable asset fact
+    mem.store_fact(
+        asset_tag="VPW-CNC-MILL-01",
+        fact_key="spindle_max_rpm",
+        fact_value="12000",
+        updated_by="lead_machinist",
+        identity_id="tech_carol",
+    )
+
+    # Step 2: Store procedural LOTO rule
+    mem.store_procedure_step(
+        procedure_name="cnc_toolholder_service",
+        step_number=1,
+        instruction="Lock out 415V primary bus at Sw-09",
+        requires_loto=True,
+    )
+
+    # Step 3: Execute 15 filler turns with trim budget = 6
+    for i in range(1, 16):
+        mem.add_session_message(
+            session_id=session_id,
+            role="user" if i % 2 == 1 else "assistant",
+            content=f"Turn {i}: Routine shift inspection observation regarding coolant temperature level {20 + i}C",
+            identity_id="tech_carol",
+            max_history=6,
+        )
+
+    # Step 4: Verify working memory was trimmed exactly to budget (6 messages)
+    active_msgs = mem.get_session_history(session_id=session_id, identity_id="tech_carol")
+    assert len(active_msgs) == 6
+    assert "Turn 15:" in active_msgs[-1]["content"]
+
+    # Step 5: Verify durable fact survives completely unaffected across 15 turns
+    fact = mem.get_fact(asset_tag="VPW-CNC-MILL-01", fact_key="spindle_max_rpm", identity_id="tech_carol")
+    assert fact is not None
+    assert fact.fact_value == "12000"
+
+    # Step 6: Verify procedural memory survives completely unaffected
+    proc = mem.get_procedure_steps("cnc_toolholder_service")
+    assert len(proc) == 1
+    assert proc[0].requires_loto is True
+
+
+def test_semantic_search_and_gdpr_purge(temp_db_file):
+    """
+    Verification of M3 Advanced Items: Semantic vector search over corpus
+    and GDPR identity data purging.
+    """
+    mem = PersistentMemoryManager(db_path=temp_db_file)
+
+    # 1. Semantic index lookup
+    results = mem.search_semantic("hydraulic press trip vibration threshold", top_k=3)
+    assert len(results) > 0
+    assert any("HYD-PRESS" in r["doc_slug"] or "hydraulic" in r["preview"].lower() for r in results)
+
+    # 2. Store user-specific history and fact
+    mem.store_fact(
+        asset_tag="CHILLER-01",
+        fact_key="coolant_type",
+        fact_value="R-134a",
+        identity_id="contractor_dave",
+    )
+    mem.record_maintenance_event(
+        asset_tag="CHILLER-01",
+        event_type="inspection",
+        summary="Contractor Dave visual inspection",
+        identity_id="contractor_dave",
+    )
+
+    # 3. Purge identity data
+    purge_report = mem.purge_identity_data(identity_id="contractor_dave")
+    assert purge_report["deleted_facts"] == 1
+    assert purge_report["deleted_history"] == 1
+
+    # 4. Verify Dave's data is completely eradicated
+    assert mem.get_fact(asset_tag="CHILLER-01", fact_key="coolant_type", identity_id="contractor_dave") is None
+    assert len(mem.get_recent_history(asset_tag="CHILLER-01", identity_id="contractor_dave")) == 0
+

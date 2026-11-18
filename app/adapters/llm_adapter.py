@@ -99,6 +99,12 @@ class GeminiProvider(BaseLLMProvider):
         temp = temperature if temperature is not None else self.settings.LLM_TEMPERATURE
         max_tok = max_tokens or self.settings.LLM_MAX_TOKENS
 
+        if not self._api_key or not self._api_key.strip():
+            raise LLMError("API key is not configured or empty.", provider="openai_compatible", retryable=False)
+
+        if getattr(self.settings, "USE_MOCK_SERVICES", False):
+            raise LLMError("Mock services enabled; external network calls disabled", provider="llm", retryable=False)
+
         contents = []
         system_instruction = None
         for msg in messages:
@@ -128,8 +134,9 @@ class GeminiProvider(BaseLLMProvider):
         )
 
         start_time = time.monotonic()
+        timeout_val = 2.0 if getattr(self.settings, "USE_MOCK_SERVICES", False) else self.settings.LLM_TIMEOUT_SECONDS
         try:
-            resp = requests.post(url, json=payload, timeout=self.settings.LLM_TIMEOUT_SECONDS)
+            resp = requests.post(url, json=payload, timeout=timeout_val)
             latency_ms = (time.monotonic() - start_time) * 1000
 
             if resp.status_code != 200:
@@ -235,6 +242,12 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         temp = temperature if temperature is not None else self.settings.LLM_TEMPERATURE
         max_tok = max_tokens or self.settings.LLM_MAX_TOKENS
 
+        if not self._api_key or not self._api_key.strip():
+            raise LLMError("API key is not configured or empty.", provider="openai_compatible", retryable=False)
+
+        if getattr(self.settings, "USE_MOCK_SERVICES", False):
+            raise LLMError("Mock services enabled; external network calls disabled", provider="llm", retryable=False)
+
         payload = {
             "model": self._model_name,
             "messages": messages,
@@ -248,12 +261,13 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         }
 
         start_time = time.monotonic()
+        timeout_val = 2.0 if getattr(self.settings, "USE_MOCK_SERVICES", False) else self.settings.LLM_TIMEOUT_SECONDS
         try:
             resp = requests.post(
                 f"{self._base_url}/chat/completions",
                 headers=headers,
                 json=payload,
-                timeout=self.settings.LLM_TIMEOUT_SECONDS,
+                timeout=timeout_val,
             )
             latency_ms = (time.monotonic() - start_time) * 1000
 

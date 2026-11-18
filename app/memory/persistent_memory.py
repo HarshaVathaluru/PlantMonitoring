@@ -416,6 +416,33 @@ class PersistentMemoryManager:
                                 char_count=len(section_text),
                             )
                         )
+
+            # Ingest PDF manuals
+            pdf_dir = settings.DATA_DIR / "corpus" / "pdf"
+            if pdf_dir.exists():
+                try:
+                    import pypdf
+                    for pdf_file in sorted(pdf_dir.glob("*.pdf")):
+                        slug = pdf_file.stem
+                        reader = pypdf.PdfReader(str(pdf_file))
+                        asset_code = slug.replace("manual-", "").upper() if slug.startswith("manual-") else None
+                        for page_idx, page in enumerate(reader.pages):
+                            page_text = (page.extract_text() or "").strip()
+                            if not page_text:
+                                continue
+                            chunks.append(
+                                DocumentChunk(
+                                    chunk_id=f"{slug}-pdf-p{page_idx+1:02d}",
+                                    doc_slug=slug,
+                                    doc_title=f"{slug.replace('-', ' ').title()} (PDF)",
+                                    section=f"Page {page_idx+1}",
+                                    asset_code=asset_code,
+                                    content=page_text,
+                                    char_count=len(page_text),
+                                )
+                            )
+                except Exception as e:
+                    pass
             self._semantic_index.fit(chunks)
 
     def search_semantic(self, query: str, top_k: int = 5, asset_code: Optional[str] = None) -> List[Dict[str, Any]]:

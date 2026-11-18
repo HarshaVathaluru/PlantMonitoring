@@ -38,8 +38,9 @@ def test_process_restart_and_approve_resume(durable_db_path, mock_rag):
     thread_id = f"TH-{uuid.uuid4().hex[:8]}"
 
     # --- SIMULATE PROCESS 1 ---
+    graph_db = str(durable_db_path.parent / "graph_cp.db")
     proc1_checkpointer = SQLiteCheckpointer(db_path=durable_db_path)
-    proc1_workflow = MaintenanceWorkflow(checkpointer=proc1_checkpointer, rag_engine=mock_rag)
+    proc1_workflow = MaintenanceWorkflow(checkpointer=proc1_checkpointer, rag_engine=mock_rag, graph_db_path=graph_db)
 
     initial_state = WorkflowState(
         thread_id=thread_id,
@@ -69,7 +70,7 @@ def test_process_restart_and_approve_resume(durable_db_path, mock_rag):
 
     # --- SIMULATE PROCESS 2 (FRESH INVOCATION AFTER RESTART) ---
     proc2_checkpointer = SQLiteCheckpointer(db_path=durable_db_path)
-    proc2_workflow = MaintenanceWorkflow(checkpointer=proc2_checkpointer, rag_engine=mock_rag)
+    proc2_workflow = MaintenanceWorkflow(checkpointer=proc2_checkpointer, rag_engine=mock_rag, graph_db_path=graph_db)
 
     # Verify state restored from SQLite
     restored_state = proc2_checkpointer.load(thread_id)
@@ -100,8 +101,9 @@ def test_process_restart_and_reject_resume(durable_db_path, mock_rag):
     thread_id = f"TH-REJ-{uuid.uuid4().hex[:8]}"
 
     # Process 1
+    graph_db = str(durable_db_path.parent / "graph_cp_rej.db")
     cp1 = SQLiteCheckpointer(db_path=durable_db_path)
-    wf1 = MaintenanceWorkflow(checkpointer=cp1, rag_engine=mock_rag)
+    wf1 = MaintenanceWorkflow(checkpointer=cp1, rag_engine=mock_rag, graph_db_path=graph_db)
 
     init_state = WorkflowState(
         thread_id=thread_id,
@@ -121,7 +123,7 @@ def test_process_restart_and_reject_resume(durable_db_path, mock_rag):
 
     # Process 2 resumes with REJECT
     cp2 = SQLiteCheckpointer(db_path=durable_db_path)
-    wf2 = MaintenanceWorkflow(checkpointer=cp2, rag_engine=mock_rag)
+    wf2 = MaintenanceWorkflow(checkpointer=cp2, rag_engine=mock_rag, graph_db_path=graph_db)
 
     rejected_state = wf2.resume_approval(
         thread_id=thread_id,

@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from pydantic import BaseModel, Field
+from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -127,15 +128,17 @@ class BM25Index:
 # ── Dense Vector Semantic Search ──
 
 class DenseVectorIndex:
-    """Dense semantic vector space model with sublinear TF and L2 cosine similarity."""
+    """Dense Latent Semantic Analysis (LSA) vector space model with TruncatedSVD embeddings."""
 
-    def __init__(self, max_features: int = 4096):
+    def __init__(self, n_components: int = 64, max_features: int = 4096):
         self.vectorizer = TfidfVectorizer(
             ngram_range=(1, 3),
             sublinear_tf=True,
             max_features=max_features,
             token_pattern=r"\b[a-zA-Z0-9_-]+\b",
         )
+        self.n_components = n_components
+        self.svd: Optional[TruncatedSVD] = None
         self.chunks: List[DocumentChunk] = []
         self.embeddings: Optional[np.ndarray] = None
 
@@ -143,7 +146,13 @@ class DenseVectorIndex:
         self.chunks = chunks
         corpus_texts = [f"{c.doc_title} {c.section} {c.content}" for c in chunks]
         if corpus_texts:
-            self.embeddings = self.vectorizer.fit_transform(corpus_texts)
+            tfidf_mat = self.vectorizer.fit_transform(corpus_texts)
+            n_comp = min(self.n_components, len(corpus_texts) - 1, tfidf_mat.shape[1] - 1)
+            if n_comp > 1:
+                self.svd = TruncatedSVD(n_components=n_comp, random_state=42)
+                self.embeddings = self.svd.fit_transform(tfidf_mat)
+            else:
+                self.embeddings = tfidf_mat.toarray()
         else:
             self.embeddings = None
 
@@ -151,7 +160,11 @@ class DenseVectorIndex:
         if self.embeddings is None or not self.chunks:
             return []
         query_vec = self.vectorizer.transform([query])
-        similarities = cosine_similarity(query_vec, self.embeddings)[0]
+        if self.svd is not None and hasattr(self.svd, "components_"):
+            query_dense = self.svd.transform(query_vec)
+        else:
+            query_dense = query_vec.toarray()
+        similarities = cosine_similarity(query_dense, self.embeddings)[0]
 
         scored = [(self.chunks[i], float(similarities[i])) for i in range(len(self.chunks))]
         scored.sort(key=lambda x: x[1], reverse=True)
@@ -278,6 +291,38 @@ class HybridRAGEngine:
                         char_count=len(section_text),
                     )
                 )
+
+        # ── 2. Format-Aware Ingestion: PDF Documents ──
+        pdf_dir = self.data_dir / "pdf"
+        if pdf_dir.exists():
+            try:
+                import pypdf
+                for pdf_file in sorted(pdf_dir.glob("*.pdf")):
+                    slug = pdf_file.stem
+                    reader = pypdf.PdfReader(str(pdf_file))
+                    asset_code = None
+                    if slug.startswith("manual-"):
+                        asset_code = slug.replace("manual-", "").upper()
+
+                    for page_idx, page in enumerate(reader.pages):
+                        page_text = page.extract_text() or ""
+                        page_text = page_text.strip()
+                        if not page_text:
+                            continue
+                        chunk_id = f"{slug}-pdf-p{page_idx+1:02d}"
+                        all_chunks.append(
+                            DocumentChunk(
+                                chunk_id=chunk_id,
+                                doc_slug=slug,
+                                doc_title=f"{slug.replace('-', ' ').title()} (PDF)",
+                                section=f"Page {page_idx+1}",
+                                asset_code=asset_code,
+                                content=page_text,
+                                char_count=len(page_text),
+                            )
+                        )
+            except Exception as e:
+                logger.warning(f"Error loading PDF documents from {pdf_dir}: {e}")
 
         self.chunks = all_chunks
         self.bm25.fit(self.chunks)
@@ -459,17 +504,20 @@ class HybridRAGEngine:
             llm_res = self.adapter.generate(prompt_messages, temperature=0.1)
             raw_ans = llm_res.content
             # Extract citations from generated answer
-            found_citations = re.findall(r"\[([a-zA-Z0-9_-]+-sec\d+)\]", raw_ans)
+            found_citations = re.findall(r"\[([a-zA-Z0-9_-]+(?:-sec\d+|-pdf-p\d+))\]", raw_ans)
             validated_citations = [f"[{c}]" for c in found_citations if f"[{c}]" in available_citations]
-            if not validated_citations:
-                validated_citations = [f"[{top_chunk.chunk_id}]"]
+            is_supported = len(validated_citations) > 0 or ("cannot verify" in raw_ans.lower())
+            confidence = "high" if len(validated_citations) > 0 else "low"
+            if not is_supported and "cannot verify" not in raw_ans.lower():
+                raw_ans = "I cannot verify this procedure or specification from the retrieved documentation."
+                confidence = "refusal"
 
             return GroundedAnswer(
                 question=question,
                 answer=raw_ans,
                 citations=validated_citations,
-                confidence="high",
-                is_supported=True,
+                confidence=confidence,
+                is_supported=is_supported,
                 retrieved_chunks=retrieved,
             )
         except Exception:
