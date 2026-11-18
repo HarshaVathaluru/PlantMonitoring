@@ -484,6 +484,27 @@ class MaintenanceWorkflow:
             "dispatched_at": datetime.now(timezone.utc).isoformat(),
             "authorized_by": auth_role,
         }
+
+        # Wire executed work order into Persistent Memory Engine
+        try:
+            from app.memory.persistent_memory import PersistentMemoryManager
+            mem = PersistentMemoryManager()
+            asset_tag = state.asset_identifier or (state.raw_alert.get("asset_identifier") if isinstance(state.raw_alert, dict) else "UNKNOWN")
+            mem.record_maintenance_event(
+                asset_tag=asset_tag,
+                event_type="work_order_dispatched",
+                summary=f"Dispatched work order WO-{state.thread_id} for {asset_tag}.",
+                work_order_id=f"WO-{state.thread_id}",
+                details={
+                    "severity": state.safety_assessment.risk_level.value if state.safety_assessment else "LOW",
+                    "authorized_by": auth_role,
+                    "po_cost_inr": state.po_cost_inr,
+                },
+                identity_id=auth_role,
+            )
+        except Exception as e:
+            logger.warning(f"Could not record maintenance event to persistent memory: {e}")
+
         self.checkpointer.save(state)
         return state
 

@@ -1,0 +1,25 @@
+{
+  "benchmark_date": "2026-08-01",
+  "total_ingested_records": 7,
+  "total_accepted": 4,
+  "total_rejected_physical_impossibility": 3,
+  "cross_field_rejection_rate": 0.4286,
+  "record_type_breakdown": {
+    "telemetry_stream": {
+      "total": 3,
+      "accepted": 2,
+      "rejected_for_safety": 1
+    },
+    "operator_log": {
+      "total": 2,
+      "accepted": 1,
+      "rejected_for_safety": 1
+    },
+    "scada_batch": {
+      "total": 2,
+      "accepted": 1,
+      "rejected_for_safety": 1
+    }
+  },
+  "schema_validation_engine": "Pydantic V2 BaseSettings & BaseModel constraints"
+}

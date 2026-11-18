@@ -82,5 +82,29 @@
     "asset_code": null,
     "target_doc": "maintenance-planning",
     "target_keywords": ["planning", "preventive", "backlog", "schedule"]
+  },
+  {
+    "id": "RAG-Q13",
+    "query": "What is the maximum operating hydraulic pressure relief valve setting for the VPW-HYD-PRESS-02 hydraulic press?",
+    "asset_code": "HYD-PRESS",
+    "target_doc": "manual-hyd-press",
+    "case_type": "near_duplicate_manuals",
+    "target_keywords": ["pressure", "relief", "hydraulic", "bar"]
+  },
+  {
+    "id": "RAG-Q14",
+    "query": "Which authorized supplier provides the precision deep groove ball bearing part number SKF-6205-2RSH?",
+    "asset_code": null,
+    "target_doc": "spares-procurement",
+    "case_type": "exact_part_id",
+    "target_keywords": ["SKF-6205-2RSH", "bearing", "supplier"]
+  },
+  {
+    "id": "RAG-Q15",
+    "query": "What is the nuclear radiation decontamination and shielding procedure for pneumatic cylinder VPW-PNEU-CYL-01?",
+    "asset_code": "PNEU-CYL",
+    "target_doc": "NONE_UNANSWERABLE",
+    "case_type": "unanswerable_question",
+    "target_keywords": ["radiation", "decontamination"]
   }
 ]

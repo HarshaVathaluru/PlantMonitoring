@@ -10,6 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from app.agents.team_supervisor import TeamSupervisor
 from app.config.settings import get_settings
 from app.graph.state import WorkflowState
 from app.graph.workflow import MaintenanceWorkflow, SQLiteCheckpointer
@@ -32,6 +33,7 @@ safety_engine = SafetyPolicyEngine()
 rag_engine = HybridRAGEngine()
 checkpointer = SQLiteCheckpointer()
 workflow_engine = MaintenanceWorkflow(checkpointer=checkpointer, rag_engine=rag_engine)
+team_supervisor = TeamSupervisor()
 tracer = PlantGuardTracer()
 circuit_breaker = CircuitBreaker(name="api_gateway_breaker")
 
@@ -92,6 +94,19 @@ class WorkflowApprovalRequest(BaseModel):
     decision: str = Field(..., description="'APPROVE' or 'REJECT'")
     role: str = Field(default="maintenance_manager", description="Approver role")
     comments: Optional[str] = Field(None, description="Review notes")
+
+
+class TeamCollaborateRequest(BaseModel):
+    asset_tag: str
+    raw_text: Optional[str] = "Routine multi-agent maintenance evaluation"
+    part_number: Optional[str] = None
+    quantity: int = 1
+    vibration_mm_s: float = 2.0
+    temp_c: float = 65.0
+    pressure_bar: Optional[float] = None
+    is_energy_isolation_involved: bool = False
+    is_hot_work_or_confined_space: bool = False
+    override_requested: bool = False
 
 
 # ── API Endpoints ──
@@ -204,10 +219,7 @@ def ingest_telemetry_alert(req: IntakeRequest):
     with tracer.trace_request("API_Ingest_Telemetry", metadata={"asset_tag": req.asset_tag}):
         with tracer.span(
             "Validation_And_Safety",
-            metadata={"asset_tag": req.asset_tag, "model": "gemini-2.0-flash", "provider": "google"},
-            prompt_tokens=48,
-            completion_tokens=24,
-            cost_usd=0.0022,
+            metadata={"asset_tag": req.asset_tag, "model": settings.LLM_MODEL, "provider": settings.LLM_PROVIDER.value},
         ):
             try:
                 return circuit_breaker.execute(_do_intake)
@@ -241,10 +253,7 @@ def investigate_technical_query(req: InvestigateRequest):
     with tracer.trace_request("API_Investigate_RAG", metadata={"query": req.query, "asset": req.asset_code}):
         with tracer.span(
             "RAG_Search_And_Grounding",
-            metadata={"query": req.query, "model": "gemini-2.0-flash", "provider": "google"},
-            prompt_tokens=185,
-            completion_tokens=92,
-            cost_usd=0.0083,
+            metadata={"query": req.query, "model": settings.LLM_MODEL, "provider": settings.LLM_PROVIDER.value},
         ):
             try:
                 return circuit_breaker.execute(_do_investigate)
@@ -283,10 +292,7 @@ def start_maintenance_workflow(req: WorkflowStartRequest):
     with tracer.trace_request("API_Workflow_Start", metadata={"asset_tag": req.asset_tag}):
         with tracer.span(
             "StateGraph_Execution",
-            metadata={"asset_tag": req.asset_tag, "model": "gemini-2.0-flash", "provider": "google"},
-            prompt_tokens=325,
-            completion_tokens=145,
-            cost_usd=0.0141,
+            metadata={"asset_tag": req.asset_tag, "model": settings.LLM_MODEL, "provider": settings.LLM_PROVIDER.value},
         ):
             try:
                 return circuit_breaker.execute(_do_workflow)
@@ -330,6 +336,33 @@ def get_workflow_status(thread_id: str):
     if not state:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Thread {thread_id} not found")
     return state.model_dump()
+
+
+@app.post("/api/v1/team/run")
+def run_multi_agent_team(req: TeamCollaborateRequest):
+    """
+    Execute collaborative multi-agent workflow across 5 specialized agents
+    using official MCP transport for downtime, inventory, supplier, and policy resources.
+    """
+    with tracer.trace_request("API_Multi_Agent_Team", metadata={"asset_tag": req.asset_tag}):
+        with tracer.span("TeamSupervisor_Collaboration", metadata={"asset_tag": req.asset_tag}):
+            raw_alert = {
+                "event_id": f"EV-TEAM-{int(datetime.now().timestamp())}",
+                "asset_tag": req.asset_tag,
+                "raw_text": req.raw_text,
+                "vibration_mm_s": req.vibration_mm_s,
+                "temp_c": req.temp_c,
+                "pressure_bar": req.pressure_bar,
+            }
+            res = team_supervisor.run_collaborative_workflow(
+                raw_alert=raw_alert,
+                part_number=req.part_number,
+                quantity=req.quantity,
+                is_energy_isolation_involved=req.is_energy_isolation_involved,
+                is_hot_work_or_confined_space=req.is_hot_work_or_confined_space,
+                override_requested=req.override_requested,
+            )
+            return res
 
 
 @app.get("/dashboard", response_class=HTMLResponse)

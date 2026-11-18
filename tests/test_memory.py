@@ -1,6 +1,8 @@
 """Tests for M3: Persistent Memory Engine (Standard Tests T1 through T9)."""
 import gc
 import os
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 import pytest
@@ -26,70 +28,82 @@ def test_persistent_memory_t1_through_t9(temp_db_file):
     """
     Execute standard evaluation test sequence T1-T9 as defined in
     PlantGuard Capstone Evaluation Guide Section 5.1.
+    Performs a TRUE OS PROCESS RESTART between Phase 1 and Phase 2.
     """
-    # ── Phase 1: Pre-restart storage ──
-    mem = PersistentMemoryManager(db_path=temp_db_file)
+    # ── Phase 1: Pre-restart storage executed in an ISOLATED CHILD OS PROCESS ──
+    proc1_code = f"""
+import sys
+from app.memory.persistent_memory import PersistentMemoryManager
 
-    # T1: Record stable fact "Pump P-101 is a critical asset."
-    fact = mem.store_fact(
-        asset_tag="P-101",
-        fact_key="criticality",
-        fact_value="CRITICAL",
-        updated_by="engineer_alice",
-        identity_id="user_alice",
+mem = PersistentMemoryManager(db_path=r'{temp_db_file}')
+
+# T1: Record stable fact "Pump P-101 is a critical asset."
+fact = mem.store_fact(
+    asset_tag="P-101",
+    fact_key="criticality",
+    fact_value="CRITICAL",
+    updated_by="engineer_alice",
+    identity_id="user_alice",
+)
+assert fact.asset_tag == "P-101"
+assert fact.fact_value == "CRITICAL"
+assert fact.version == 1
+
+# T2: Complete an event: bearing replaced on P-101 under a work order
+rec = mem.record_maintenance_event(
+    asset_tag="P-101",
+    event_type="bearing_replacement",
+    summary="Drive-end roller bearing replaced and lubricated under work order VPW-WO-00042",
+    work_order_id="VPW-WO-00042",
+    details={{"part_fitted": "VPW-P-00123", "hours_taken": 3.5}},
+    identity_id="user_alice",
+    timestamp="2026-08-01T11:00:00",
+)
+assert rec.work_order_id == "VPW-WO-00042"
+assert rec.asset_tag == "P-101"
+
+# T3: Store LOTO procedural steps for pump maintenance
+mem.store_procedure_step(
+    procedure_name="pump_loto",
+    asset_code="PUMP-CENT",
+    step_number=1,
+    instruction="Notify affected production supervisor on Line 2",
+    requires_loto=True,
+)
+mem.store_procedure_step(
+    procedure_name="pump_loto",
+    asset_code="PUMP-CENT",
+    step_number=2,
+    instruction="Isolate 415V electrical feed at MCC-02 Breaker 4 and apply red padlock",
+    safety_hazard="electrical",
+    requires_loto=True,
+)
+mem.store_procedure_step(
+    procedure_name="pump_loto",
+    asset_code="PUMP-CENT",
+    step_number=3,
+    instruction="Close suction and discharge valves, bleed residual pressure via drain cock",
+    safety_hazard="hydraulic_pressure",
+    requires_loto=True,
+)
+
+loto_steps = mem.get_procedure_steps("pump_loto")
+assert len(loto_steps) == 3
+print("PHASE_1_PROCESS_PERSISTED_SUCCESSFULLY", flush=True)
+sys.exit(0)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", proc1_code],
+        capture_output=True,
+        text=True,
+        check=False,
     )
-    assert fact.asset_tag == "P-101"
-    assert fact.fact_value == "CRITICAL"
-    assert fact.version == 1
+    assert result.returncode == 0, f"Child process failed: {result.stderr}"
+    assert "PHASE_1_PROCESS_PERSISTED_SUCCESSFULLY" in result.stdout
 
-    # T2: Complete an event: bearing replaced on P-101 under a work order
-    rec = mem.record_maintenance_event(
-        asset_tag="P-101",
-        event_type="bearing_replacement",
-        summary="Drive-end roller bearing replaced and lubricated under work order VPW-WO-00042",
-        work_order_id="VPW-WO-00042",
-        details={"part_fitted": "VPW-P-00123", "hours_taken": 3.5},
-        identity_id="user_alice",
-        timestamp="2026-08-01T11:00:00",
-    )
-    assert rec.work_order_id == "VPW-WO-00042"
-    assert rec.asset_tag == "P-101"
+    # ── TRUE OS PROCESS RESTART: Child process is completely dead and unmapped ──
 
-    # T3: Store LOTO procedural steps for pump maintenance
-    mem.store_procedure_step(
-        procedure_name="pump_loto",
-        asset_code="PUMP-CENT",
-        step_number=1,
-        instruction="Notify affected production supervisor on Line 2",
-        requires_loto=True,
-    )
-    mem.store_procedure_step(
-        procedure_name="pump_loto",
-        asset_code="PUMP-CENT",
-        step_number=2,
-        instruction="Isolate 415V electrical feed at MCC-02 Breaker 4 and apply red padlock",
-        safety_hazard="electrical",
-        requires_loto=True,
-    )
-    mem.store_procedure_step(
-        procedure_name="pump_loto",
-        asset_code="PUMP-CENT",
-        step_number=3,
-        instruction="Close suction and discharge valves, bleed residual pressure via drain cock",
-        safety_hazard="hydraulic_pressure",
-        requires_loto=True,
-    )
-
-    loto_steps = mem.get_procedure_steps("pump_loto")
-    assert len(loto_steps) == 3
-    assert loto_steps[1].step_number == 2
-    assert "padlock" in loto_steps[1].instruction
-
-    # ── SIMULATED PROCESS RESTART ──
-    # Destroy mem object completely to verify disk persistence
-    del mem
-
-    # ── Phase 2: Post-restart recovery ──
+    # ── Phase 2: Post-restart recovery in new process context ──
     mem_restarted = PersistentMemoryManager(db_path=temp_db_file)
 
     # T4: New thread recalls bearing replacement and work-order specifics

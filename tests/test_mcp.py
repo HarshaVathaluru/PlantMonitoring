@@ -52,3 +52,25 @@ def test_mcp_resource_procurement_matrix():
     assert "1,000,000" in content
     assert "Maintenance Manager" in content
     assert "Plant Head" in content
+
+
+def test_mcp_prompt_loto_briefing():
+    """Level 4: Test authoritative MCP prompt template enumeration and retrieval."""
+    client = PlantGuardMCPClient()
+    prompts = client.list_prompts()
+    assert len(prompts) >= 1
+    assert any(p["name"] == "loto_briefing" for p in prompts)
+
+    text = client.get_prompt("loto_briefing", {"asset_tag": "VPW-HYD-PRESS-02"})
+    assert "VPW-HYD-PRESS-02" in text
+    assert "zero-energy verification" in text
+    assert "SOP-LOTO-01" in text
+
+
+def test_mcp_hardened_server_error_handling():
+    """Level 4: Test server hardening against unknown tools and resources."""
+    client = PlantGuardMCPClient()
+    # Invalid tool call should raise RuntimeError or protocol error without server crash
+    with pytest.raises(RuntimeError) as exc_info:
+        client.call_tool("unregistered_hazardous_tool", {"action": "bypass"})
+    assert "not found" in str(exc_info.value).lower()

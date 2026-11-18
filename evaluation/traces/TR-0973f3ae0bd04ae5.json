@@ -1,0 +1,36 @@
+{
+  "trace_id": "TR-0973f3ae0bd04ae5",
+  "name": "API_Investigate_RAG",
+  "session_id": "SESS-256af7dd",
+  "user_id": "operator_system",
+  "start_time_iso": "2026-11-18T17:05:10.501360+00:00",
+  "end_time_iso": "2026-11-18T17:05:10.502171+00:00",
+  "duration_ms": 0.03,
+  "total_tokens": 0,
+  "total_cost_usd": 0.0,
+  "spans": [
+    {
+      "span_id": "314957df8bb7",
+      "name": "RAG_Search_And_Grounding",
+      "parent_span_id": null,
+      "start_time_iso": "2026-11-18T17:05:10.501360+00:00",
+      "end_time_iso": "2026-11-18T17:05:10.502171+00:00",
+      "duration_ms": 0.03,
+      "status": "SUCCESS",
+      "error_message": null,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "metadata": {
+        "query": "What is the purge cycle for the ammonia refrigeration unit?",
+        "model": "gemini-3.1-flash-lite",
+        "provider": "gemini"
+      }
+    }
+  ],
+  "metadata": {
+    "query": "What is the purge cycle for the ammonia refrigeration unit?",
+    "asset": null
+  }
+}

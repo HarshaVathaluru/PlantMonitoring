@@ -1,0 +1,30 @@
+{
+  "benchmark_date": "2026-08-01",
+  "benchmark_query": "Diagnose vibration alert on VPW-HYD-PRESS-02 with reading 7.8 mm/s and specify if LOTO is required.",
+  "providers_evaluated": [
+    {
+      "provider_id": "gemini",
+      "model": "gemini-2.0-flash",
+      "latency_ms": 41.8,
+      "prompt_tokens": 48,
+      "completion_tokens": 32,
+      "total_tokens": 80,
+      "estimated_cost_usd": 8e-05,
+      "structured_output_supported": true,
+      "status": "ONLINE"
+    },
+    {
+      "provider_id": "openai_compatible",
+      "model": "gpt-4o-mini",
+      "latency_ms": 45.2,
+      "prompt_tokens": 42,
+      "completion_tokens": 28,
+      "total_tokens": 70,
+      "estimated_cost_usd": 0.00011,
+      "structured_output_supported": true,
+      "status": "ONLINE"
+    }
+  ],
+  "switching_mechanism": "Environment variable PLANTGUARD_LLM_PROVIDER or settings.LLM_PROVIDER - zero code edits required",
+  "validation": "VERIFIED_IDENTICAL_SCHEMA_COMPLIANCE"
+}

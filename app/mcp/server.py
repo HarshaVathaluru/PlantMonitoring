@@ -100,11 +100,49 @@ Rules:
 """
 
 
+# ── Level 4 Prompt 1: LOTO Safety Briefing ──
+@mcp_server.prompt("loto_briefing")
+def loto_briefing_prompt(asset_tag: str) -> str:
+    """Standardized safety briefing prompt for LOTO isolation of industrial machinery."""
+    return f"Provide the mandatory zero-energy verification steps, lock placement locations, and electrical isolation breakers for {asset_tag} under PlantGuard SOP-LOTO-01."
+
+
 def handle_jsonrpc_request(req_data: Dict[str, Any]) -> Dict[str, Any]:
     """Execute JSON-RPC 2.0 requests across MCP transport boundary."""
     method = req_data.get("method")
     req_id = req_data.get("id", 1)
     params = req_data.get("params", {})
+
+    if method == "prompts/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "prompts": [
+                    {
+                        "name": "loto_briefing",
+                        "description": "Standardized safety briefing prompt for LOTO isolation of industrial machinery.",
+                        "arguments": [{"name": "asset_tag", "description": "Target equipment asset identifier", "required": True}],
+                    }
+                ]
+            },
+        }
+
+    if method == "prompts/get":
+        name = params.get("name")
+        args = params.get("arguments", {})
+        if name == "loto_briefing":
+            tag = args.get("asset_tag", "VPW-GEN-01")
+            text = loto_briefing_prompt(tag)
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "description": "LOTO Safety Briefing",
+                    "messages": [{"role": "user", "content": {"type": "text", "text": text}}],
+                },
+            }
+        return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": f"Prompt not found: {name}"}}
 
     if method == "tools/list":
         return {

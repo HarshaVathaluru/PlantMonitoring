@@ -1,0 +1,80 @@
+{
+  "benchmark_date": "2026-08-01",
+  "mcp_server": "PlantGuard FastMCP Production Server",
+  "mcp_protocol_version": "2.0 / 2024-11-05",
+  "transport": "Subprocess Stdio Transport crossing OS process boundary",
+  "registered_tools": [
+    "check_spare_parts_inventory",
+    "get_supplier_info",
+    "calculate_downtime_cost"
+  ],
+  "registered_resources": [
+    "plantguard://policies/procurement_approval_matrix"
+  ],
+  "registered_prompts": [
+    "loto_briefing"
+  ],
+  "tool_call_evidence": {
+    "check_spare_parts_inventory": {
+      "part_number": "SKF-6205-2RSH",
+      "description": "",
+      "asset_code": "",
+      "on_hand": 0,
+      "reorder_point": 0,
+      "unit_cost_inr": 0,
+      "lead_time_days": 0,
+      "supplier_tier": "",
+      "supplier_id": null,
+      "minimum_order_quantity": null,
+      "is_stock_low": false,
+      "error": "Part 'SKF-6205-2RSH' not found in inventory registry"
+    },
+    "calculate_downtime_cost": {
+      "asset_tag": "VPW-HYD-PRESS-02",
+      "downtime_minutes": 60,
+      "hourly_rate_inr": 40000,
+      "rate_source": "asset_specific",
+      "total_cost_inr": 40000,
+      "criticality": "A",
+      "safety_risk": "HIGH",
+      "environmental_impact": "MINOR",
+      "error": null
+    },
+    "get_supplier_info": {
+      "supplier_id": "VPW-SUP-001",
+      "name": "Misra Bearings & Seals",
+      "tier": "T1",
+      "city": "Chennai",
+      "lead_time_days": null,
+      "status": "ACTIVE"
+    }
+  },
+  "resource_read_evidence": {
+    "uri": "plantguard://policies/procurement_approval_matrix",
+    "length_chars": 672,
+    "content_preview": "# PlantGuard Authoritative Procurement Approval Matrix\nReference: Corporate Financial Authority Standard Cl-4.2\nLast Updated: 2026-08-01\n\n| Tier | Total PO Amount (INR) | Required Approval Authority |"
+  },
+  "prompt_get_evidence": {
+    "name": "loto_briefing",
+    "rendered_prompt": "Provide the mandatory zero-energy verification steps, lock placement locations, and electrical isolation breakers for VPW-HYD-PRESS-02 under PlantGuard SOP-LOTO-01."
+  },
+  "multi_agent_team_supervisor_run": {
+    "workflow_id": "EV-MCP-EVIDENCE-01",
+    "hop_count": 5,
+    "revision_count": 0,
+    "final_decision": "AUTO_APPROVED",
+    "agents_exercised": [
+      "IntakeAgent",
+      "RAGAgent",
+      "RecommendationAgent",
+      "ProcurementAgent",
+      "SafetyAgent"
+    ],
+    "mcp_tools_used_by_agents": [
+      "calculate_downtime_cost",
+      "check_spare_parts_inventory",
+      "get_supplier_info"
+    ],
+    "mcp_resource_read_by_procurement": "plantguard://policies/procurement_approval_matrix"
+  }
+}

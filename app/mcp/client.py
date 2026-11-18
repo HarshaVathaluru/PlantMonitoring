@@ -123,3 +123,32 @@ class PlantGuardMCPClient:
         if contents and "text" in contents[0]:
             return contents[0]["text"]
         return ""
+
+    def list_prompts(self) -> List[Dict[str, Any]]:
+        """List prompts registered on the PlantGuard MCP server across transport boundary."""
+        rpc_request = {
+            "jsonrpc": "2.0",
+            "id": 30,
+            "method": "prompts/list",
+            "params": {},
+        }
+        res = self._send_transport_frame(rpc_request)
+        return res.get("prompts", [])
+
+    def get_prompt(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> str:
+        """Retrieve an authoritative prompt template by name across transport boundary."""
+        rpc_request = {
+            "jsonrpc": "2.0",
+            "id": 31,
+            "method": "prompts/get",
+            "params": {
+                "name": name,
+                "arguments": arguments or {},
+            },
+        }
+        res = self._send_transport_frame(rpc_request)
+        messages = res.get("messages", [])
+        if messages and "content" in messages[0]:
+            c = messages[0]["content"]
+            return c.get("text", "") if isinstance(c, dict) else str(c)
+        return ""

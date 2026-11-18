@@ -148,3 +148,99 @@ def test_single_agent_tool_execution():
     assert "calculate_downtime_cost" in result.findings
     assert result.requires_human_approval is True  # Cost >= 30,000 INR triggers approval
 
+
+def test_single_agent_all_tools_and_handoff_demonstration():
+    """
+    Demonstrate single agent selecting all 4 required operational tools in sequence
+    plus triggering human approval handoff (M2 Level 4 Core Requirement):
+    1. get_sensor_history
+    2. calculate_downtime_cost
+    3. check_spare_parts_inventory
+    4. schedule_technician
+    -> human approval hand-off on finish.
+    """
+    from app.agents.single_agent import ToolCallDecision
+    from app.adapters.llm_adapter import LLMResponse
+
+    class AllToolsDemonstrationAdapter:
+        def __init__(self):
+            self.step = 0
+
+        def generate_structured(self, messages, output_schema, **kwargs):
+            self.step += 1
+            if self.step == 1:
+                return (
+                    ToolCallDecision(
+                        thought="Step 1: Check baseline telemetry and vibration threshold for VPW-HYD-PRESS-02.",
+                        action="get_sensor_history",
+                        action_input={"asset_tag": "VPW-HYD-PRESS-02", "hours": 24},
+                    ),
+                    LLMResponse(content="", model="mock", provider="mock"),
+                )
+            elif self.step == 2:
+                return (
+                    ToolCallDecision(
+                        thought="Step 2: Calculate financial downtime impact for 120 minutes line stop.",
+                        action="calculate_downtime_cost",
+                        action_input={"asset_tag": "VPW-HYD-PRESS-02", "downtime_minutes": 120},
+                    ),
+                    LLMResponse(content="", model="mock", provider="mock"),
+                )
+            elif self.step == 3:
+                return (
+                    ToolCallDecision(
+                        thought="Step 3: Check spare parts inventory for required replacement seal kit.",
+                        action="check_spare_parts_inventory",
+                        action_input={"part_number": "VPW-P-00000"},
+                    ),
+                    LLMResponse(content="", model="mock", provider="mock"),
+                )
+            elif self.step == 4:
+                return (
+                    ToolCallDecision(
+                        thought="Step 4: Check qualified mechanical technician availability on Shift A.",
+                        action="schedule_technician",
+                        action_input={
+                            "required_skill": "Mechanical",
+                            "estimated_hours": 4,
+                            "date_str": "2026-08-01",
+                            "shift": "A",
+                        },
+                    ),
+                    LLMResponse(content="", model="mock", provider="mock"),
+                )
+            else:
+                return (
+                    ToolCallDecision(
+                        thought="Step 5: All required evidence gathered. Escalate for human approval due to high downtime cost.",
+                        action="finish",
+                        action_input={},
+                    ),
+                    LLMResponse(content="", model="mock", provider="mock"),
+                )
+
+        def generate(self, messages, **kwargs):
+            return LLMResponse(
+                content="Investigation complete: All 4 operational systems interrogated. Total cost 80,000 INR; technician and parts verified. Human hand-off initiated.",
+                model="mock",
+                provider="mock",
+            )
+
+    agent = MaintenanceSingleAgent(llm_adapter=AllToolsDemonstrationAdapter())  # type: ignore
+    run_result = agent.run(
+        query="Perform end-to-end multi-tool diagnostic on VPW-HYD-PRESS-02 for high vibration and downtime."
+    )
+
+    assert run_result.steps_executed == 4
+    assert len(run_result.tools_called) == 4
+    called_tool_names = [call["tool"] for call in run_result.tools_called]
+    assert called_tool_names == [
+        "get_sensor_history",
+        "calculate_downtime_cost",
+        "check_spare_parts_inventory",
+        "schedule_technician",
+    ]
+    assert run_result.stop_reason == "completed"
+    assert run_result.requires_human_approval is True
+    assert "80,000 INR" in run_result.final_synthesis
+

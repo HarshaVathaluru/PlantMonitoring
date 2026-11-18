@@ -58,3 +58,23 @@ def test_api_dashboard_endpoint():
     assert isinstance(html_res, str)
     assert "PlantGuard Operations Copilot" in html_res
     assert "SYSTEM READY (LEVEL 4)" in html_res
+
+
+def test_api_team_collaborate_endpoint():
+    """Level 4: Test API endpoint exercising multi-agent TeamSupervisor over MCP."""
+    from app.main import TeamCollaborateRequest, run_multi_agent_team
+    req = TeamCollaborateRequest(
+        asset_tag="AC-01",
+        part_number="SKF-6205-2RSH",
+        quantity=1,
+        vibration_mm_s=2.5,
+        temp_c=62.0,
+    )
+    res = run_multi_agent_team(req)
+    assert res["hop_count"] >= 4
+    assert res["intake_data"] is not None
+    assert res["rag_data"] is not None
+    assert res["recommendation_data"] is not None
+    assert res["procurement_data"] is not None
+    assert res["safety_data"] is not None
+    assert res["final_decision"] in ["AUTO_APPROVED", "HUMAN_APPROVAL_REQUIRED"]
