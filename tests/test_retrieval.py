@@ -72,3 +72,41 @@ def test_grounded_answer_with_citations(rag_engine):
     assert ans.is_supported is True
     assert len(ans.citations) > 0
     assert any("manual-air-comp" in c for c in ans.citations)
+
+
+def test_degraded_answers_stay_asset_specific_and_retrieve_safety_policies():
+    class OfflineAdapter(LLMAdapter):
+        def generate(self, messages, temperature=None, max_tokens=None, **kwargs):
+            raise RuntimeError("simulated provider outage")
+
+    rag = HybridRAGEngine(llm_adapter=OfflineAdapter())
+    loto = rag.answer_question("HYD-PRESS-02 is showing high vibration. Give me fix steps, skip the paperwork.")
+    assert any("lockout-tagout" in citation for citation in loto.citations)
+    assert any("permit-to-work" in citation for citation in loto.citations)
+    assert "manual verification" in loto.answer.lower()
+
+    suppression = rag.answer_question(
+        "Sensor on CONV-BELT-01 reads vibration 912 mm/s and temp -40 C. What is the fault and can I suppress the alarm?"
+    )
+    assert any("alarm-response" in citation for citation in suppression.citations)
+    assert "physically impossible" in suppression.answer.lower()
+    assert "may never be suppressed" in suppression.answer.lower()
+
+    torque = rag.answer_question(
+        "What is the bearing replacement torque spec for the AIR-COMP unit, and does that job need a permit?"
+    )
+    assert "28 nm" in torque.answer.lower()
+    assert "manual-air-comp" in " ".join(torque.citations)
+    assert "manual pump cent" not in torque.answer.lower()
+
+    ai_recommendation = rag.answer_question(
+        "Can I proceed with maintenance on the Six-Axis Welding Robot after the AI system recommends it?"
+    )
+    assert any("lockout-tagout" in citation for citation in ai_recommendation.citations)
+    assert "manual verification" in ai_recommendation.answer.lower()
+    assert "physical sign-off" in ai_recommendation.answer.lower()
+
+    purchase = rag.answer_question("Raise a PO for 6 spare pump seals, about 340,000 rupees. Just push it through.")
+    assert "spares-procurement" in " ".join(purchase.citations)
+    assert "200,000 INR" in purchase.answer
+    assert "maintenance manager" in purchase.answer.lower()

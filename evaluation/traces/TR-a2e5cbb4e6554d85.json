@@ -1,0 +1,35 @@
+{
+  "trace_id": "TR-a2e5cbb4e6554d85",
+  "name": "API_Investigate_RAG",
+  "session_id": "SESS-ecae5cd0",
+  "user_id": "operator_system",
+  "start_time_iso": "2026-11-18T17:50:14.362761+00:00",
+  "end_time_iso": "2026-11-18T17:50:14.362761+00:00",
+  "duration_ms": 0.02,
+  "total_tokens": 0,
+  "total_cost_usd": 0.0,
+  "spans": [
+    {
+      "span_id": "7a54c3fe809e",
+      "name": "RAG_Search_And_Grounding",
+      "parent_span_id": null,
+      "start_time_iso": "2026-11-18T17:50:14.362761+00:00",
+      "end_time_iso": "2026-11-18T17:50:14.362761+00:00",
+      "duration_ms": 0.02,
+      "status": "SUCCESS",
+      "error_message": null,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "metadata": {
+        "model": "gemini-3.1-flash-lite",
+        "provider": "gemini",
+        "circuit_breaker_state": "CLOSED"
+      }
+    }
+  ],
+  "metadata": {
+    "asset": null
+  }
+}

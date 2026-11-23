@@ -15,13 +15,18 @@ from __future__ import annotations
 import json
 import logging
 import re
+import tempfile
+import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
 from app.config.settings import get_settings
+from app.adapters.llm_adapter import LLMAdapter
 from app.eval.llm_judge import LLMJudge
 from app.graph.state import WorkflowState
-from app.graph.workflow import MaintenanceWorkflow
+from app.graph.workflow import MaintenanceWorkflow, SQLiteCheckpointer
+from app.memory.persistent_memory import PersistentMemoryManager
 from app.rag.engine import HybridRAGEngine
 from app.safety.policy_engine import SafetyPolicyEngine
 
@@ -29,7 +34,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("plantguard.golden_eval")
 
 
-def run_golden_evaluation() -> Dict[str, Any]:
+def _judged_average(results: List[Dict[str, Any]], key: str) -> float | None:
+    values = [row["judge_evaluation"].get(key) for row in results if row["judge_evaluation"].get(key) is not None]
+    return round(sum(values) / len(values), 2) if values else None
+
+
+def run_golden_evaluation(require_live_judge: bool = False, output_path: Path | None = None) -> Dict[str, Any]:
     settings = get_settings()
     golden_path = settings.DATA_DIR / "eval" / "golden_set.json"
     if not golden_path.exists():
@@ -39,9 +49,18 @@ def run_golden_evaluation() -> Dict[str, Any]:
         cases = json.load(f)
 
     safety = SafetyPolicyEngine()
-    rag = HybridRAGEngine()
-    workflow_engine = MaintenanceWorkflow(rag_engine=rag)
-    judge = LLMJudge()
+    rag_settings = settings.model_copy(deep=True)
+    # In --live mode, answer generation and judging both use the configured provider.
+    # RAG itself degrades to retrieved source excerpts if a provider request fails.
+    rag = HybridRAGEngine(llm_adapter=LLMAdapter(rag_settings))
+    evaluation_db = tempfile.mkdtemp(prefix="plantguard-eval-")
+    workflow_engine = MaintenanceWorkflow(
+        checkpointer=SQLiteCheckpointer(Path(evaluation_db) / "state.sqlite"),
+        rag_engine=rag,
+        graph_db_path=str(Path(evaluation_db) / "graph.sqlite"),
+        memory_manager=PersistentMemoryManager(Path(evaluation_db) / "memory.sqlite"),
+    )
+    judge = LLMJudge(require_llm=require_live_judge)
 
     results: List[Dict[str, Any]] = []
     total_cases = len(cases)
@@ -193,14 +212,25 @@ def run_golden_evaluation() -> Dict[str, Any]:
             answer_correct += 1
 
         # ── 5. LLM Judge Rubric Evaluation ──
-        judge_eval = judge.evaluate_case(
-            case_id=case_id,
-            question=q,
-            expected_answer=expected_answer,
-            actual_answer=grounded.answer,
-            citations=actual_citations,
-            category=category,
-        )
+        try:
+            judge_eval = judge.evaluate_case(
+                case_id=case_id,
+                question=q,
+                expected_answer=expected_answer,
+                actual_answer=grounded.answer,
+                citations=actual_citations,
+                category=category,
+            )
+        except RuntimeError:
+            # Keep the case and deterministic metrics; clearly record that a live judge
+            # score is unavailable rather than substituting fabricated or fallback scores.
+            from app.eval.llm_judge import JudgeEvaluation
+            judge_eval = JudgeEvaluation(
+                case_id=case_id,
+                verdict="UNAVAILABLE",
+                reasoning="Live judge provider was temporarily unavailable; this case has no LLM score.",
+                evaluation_source="unavailable",
+            )
         if judge_eval.verdict == "PASS":
             judge_passed += 1
 
@@ -229,7 +259,7 @@ def run_golden_evaluation() -> Dict[str, Any]:
         })
 
     summary = {
-        "benchmark_date": "2026-08-01",
+        "benchmark_date": datetime.now(timezone.utc).date().isoformat(),
         "total_test_cases": total_cases,
         "total_cases": total_cases,
         "overall_accuracy": round(sum(1 for r in results if r["overall_pass"]) / total_cases, 4),
@@ -238,15 +268,29 @@ def run_golden_evaluation() -> Dict[str, Any]:
         "guardrails_compliance": round(guardrails_passed / total_cases, 4),
         "answer_factual_accuracy": round(answer_correct / total_cases, 4),
         "llm_judge_verdict_pass_rate": round(judge_passed / total_cases, 4),
-        "llm_judge_avg_groundedness": round(sum(r["judge_evaluation"]["groundedness_score"] for r in results) / total_cases, 2),
-        "llm_judge_avg_safety_compliance": round(sum(r["judge_evaluation"]["safety_compliance_score"] for r in results) / total_cases, 2),
-        "llm_judge_avg_factual_precision": round(sum(r["judge_evaluation"]["factual_precision_score"] for r in results) / total_cases, 2),
+        "llm_judge_coverage": round(sum(1 for r in results if r["judge_evaluation"]["evaluation_source"] != "unavailable") / total_cases, 4),
+        "llm_judge_avg_groundedness": _judged_average(results, "groundedness_score"),
+        "llm_judge_avg_safety_compliance": _judged_average(results, "safety_compliance_score"),
+        "llm_judge_avg_factual_precision": _judged_average(results, "factual_precision_score"),
         "adversarial_cases": adversarial_total,
-        "adversarial_robustness_rate": 1.0,
+        "adversarial_robustness_rate": round(adversarial_passed / adversarial_total, 4) if adversarial_total else None,
         "adversarial_pass_rate": f"{adversarial_passed}/{adversarial_total}",
+        "unsafe_auto_execution_cases": sum(
+            1 for result in results
+            if result["expected_route"] == "human_review" and result["actual_route"] == "auto"
+        ),
+        "safety_critical_auto_execution_rate": round(
+            sum(1 for result in results if result["expected_route"] == "human_review" and result["actual_route"] == "auto")
+            / max(1, sum(1 for result in results if result["expected_route"] == "human_review")), 4
+        ),
+        "safety_critical_auto_execution_target": 0.0,
         "all_criteria_passed_count": sum(1 for r in results if r["overall_pass"]),
-        "evaluation_band": "Distinction (Level 4)",
-        "status": "EVALUATION_SUCCESS",
+        "judge_source_counts": {
+            source: sum(1 for result in results if result["judge_evaluation"].get("evaluation_source") == source)
+            for source in sorted({result["judge_evaluation"].get("evaluation_source", "unknown") for result in results})
+        },
+        "evaluation_band": "Not assigned by this script",
+        "status": "EVALUATION_COMPLETE_WITH_JUDGE_GAPS" if any(r["judge_evaluation"]["evaluation_source"] == "unavailable" for r in results) else "EVALUATION_COMPLETE",
     }
 
     output_payload = {
@@ -254,7 +298,12 @@ def run_golden_evaluation() -> Dict[str, Any]:
         "results": results,
     }
 
-    out_file = Path("evaluation") / "end_to_end_results.json"
+    workflow_engine._graph_conn.close()
+    import shutil
+    shutil.rmtree(evaluation_db, ignore_errors=True)
+
+    out_file = output_path or (Path("evaluation") / "end_to_end_results.json")
+    out_file.parent.mkdir(parents=True, exist_ok=True)
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(output_payload, f, indent=2)
 
@@ -263,4 +312,9 @@ def run_golden_evaluation() -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    run_golden_evaluation()
+    parser = argparse.ArgumentParser(description="Run the PlantGuard end-to-end golden benchmark.")
+    parser.add_argument("--live", action="store_true", help="Disable mock services and require a real LLM judge provider call.")
+    args = parser.parse_args()
+    if args.live:
+        get_settings().USE_MOCK_SERVICES = False
+    run_golden_evaluation(require_live_judge=args.live)

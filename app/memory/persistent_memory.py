@@ -250,6 +250,23 @@ class PersistentMemoryManager:
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            if work_order_id:
+                cursor.execute(
+                    "SELECT * FROM maintenance_history WHERE work_order_id = ? AND identity_id = ? ORDER BY record_id LIMIT 1",
+                    (work_order_id, identity_id),
+                )
+                existing = cursor.fetchone()
+                if existing:
+                    return MaintenanceHistoryRecord(
+                        record_id=existing["record_id"],
+                        asset_tag=existing["asset_tag"],
+                        work_order_id=existing["work_order_id"],
+                        event_timestamp=existing["event_timestamp"],
+                        event_type=existing["event_type"],
+                        summary=existing["summary"],
+                        details=json.loads(existing["details_json"] or "{}"),
+                        identity_id=existing["identity_id"],
+                    )
             cursor.execute("""
                 INSERT INTO maintenance_history (asset_tag, work_order_id, event_timestamp, event_type, summary, details_json, identity_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?)

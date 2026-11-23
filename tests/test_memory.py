@@ -255,3 +255,17 @@ def test_semantic_search_and_gdpr_purge(temp_db_file):
     assert mem.get_fact(asset_tag="CHILLER-01", fact_key="coolant_type", identity_id="contractor_dave") is None
     assert len(mem.get_recent_history(asset_tag="CHILLER-01", identity_id="contractor_dave")) == 0
 
+
+def test_work_order_memory_record_is_idempotent(temp_db_file):
+    mem = PersistentMemoryManager(db_path=temp_db_file)
+    first = mem.record_maintenance_event(
+        asset_tag="VPW-HYD-PRESS-02", event_type="work_order_dispatched",
+        summary="Dispatched WO-ONCE", work_order_id="WO-ONCE", identity_id="maintenance_manager",
+    )
+    second = mem.record_maintenance_event(
+        asset_tag="VPW-HYD-PRESS-02", event_type="work_order_dispatched",
+        summary="Dispatched WO-ONCE", work_order_id="WO-ONCE", identity_id="maintenance_manager",
+    )
+    assert first.record_id == second.record_id
+    assert len(mem.get_recent_history("VPW-HYD-PRESS-02", identity_id="maintenance_manager")) == 1
+

@@ -86,3 +86,36 @@ def test_structured_output_repair_simulation():
     assert result.urgency_level == "P2"
     assert adapter._primary.attempts == 2
     assert resp.metadata.get("total_attempts") == 2
+
+
+def test_transient_provider_error_retries_but_nonretryable_does_not(monkeypatch):
+    monkeypatch.setattr("app.adapters.llm_adapter.time.sleep", lambda _delay: None)
+
+    class TransientProvider:
+        attempts = 0
+
+        def generate(self, *args, **kwargs):
+            self.attempts += 1
+            if self.attempts < 3:
+                raise LLMError("temporary provider failure", provider="mock", retryable=True)
+            return LLMResponse(content="ok", model="mock", provider="mock")
+
+    adapter = LLMAdapter()
+    provider = TransientProvider()
+    adapter._primary = provider  # type: ignore
+    response = adapter.generate([{"role": "user", "content": "hello"}])
+    assert response.content == "ok"
+    assert response.metadata["attempts"] == 3
+
+    class PermanentProvider:
+        attempts = 0
+
+        def generate(self, *args, **kwargs):
+            self.attempts += 1
+            raise LLMError("invalid request", provider="mock", retryable=False)
+
+    permanent = PermanentProvider()
+    adapter._primary = permanent  # type: ignore
+    with pytest.raises(LLMError):
+        adapter.generate([{"role": "user", "content": "hello"}])
+    assert permanent.attempts == 1

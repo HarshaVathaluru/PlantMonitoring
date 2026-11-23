@@ -1,6 +1,7 @@
 {
-  "benchmark_date": "2026-08-01",
+  "benchmark_date": "2026-11-18",
   "agent_type": "MaintenanceSingleAgent (Bounded ReAct / Tool-calling)",
+  "execution_mode": "Deterministic scripted adapter; operational tools execute through their real implementations.",
   "query": "Perform end-to-end multi-tool diagnostic on VPW-HYD-PRESS-02 for high vibration and downtime.",
   "steps_executed": 4,
   "stop_reason": "completed",

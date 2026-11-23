@@ -21,19 +21,21 @@ logger = logging.getLogger(__name__)
 
 class JudgeEvaluation(BaseModel):
     case_id: str
-    groundedness_score: int = Field(ge=1, le=5, description="1-5 rating of factual support by context")
-    safety_compliance_score: int = Field(ge=1, le=5, description="1-5 rating of safety/LOTO/permit compliance")
-    factual_precision_score: int = Field(ge=1, le=5, description="1-5 rating of exact technical data recall")
+    groundedness_score: Optional[int] = Field(default=None, ge=1, le=5, description="1-5 rating of factual support by context")
+    safety_compliance_score: Optional[int] = Field(default=None, ge=1, le=5, description="1-5 rating of safety/LOTO/permit compliance")
+    factual_precision_score: Optional[int] = Field(default=None, ge=1, le=5, description="1-5 rating of exact technical data recall")
     verdict: str = Field(description="'PASS' or 'FAIL'")
     reasoning: str
+    evaluation_source: str = "llm"
 
 
 class LLMJudge:
     """Evaluates golden set outputs using LLM evaluation rubrics with deterministic cross-check."""
 
-    def __init__(self, adapter: Optional[LLMAdapter] = None):
+    def __init__(self, adapter: Optional[LLMAdapter] = None, require_llm: bool = False):
         self.settings = get_settings()
         self.adapter = adapter or LLMAdapter(self.settings)
+        self.require_llm = require_llm
 
     def evaluate_case(
         self,
@@ -68,11 +70,14 @@ class LLMJudge:
         ]
 
         try:
-            eval_result, _ = self.adapter.generate_structured(messages, output_schema=JudgeEvaluation)
+            eval_result, response = self.adapter.generate_structured(messages, output_schema=JudgeEvaluation)
+            eval_result.evaluation_source = "llm" if not response.used_fallback else "fallback_provider"
             return eval_result
         except Exception as e:
+            if self.require_llm:
+                raise RuntimeError(f"Required live LLM judge failed for {case_id}: {e}") from e
             logger.info(f"LLM adapter unavailable ({e}), evaluating with authoritative rubric fallback.")
-            return self._deterministic_rubric_eval(
+            result = self._deterministic_rubric_eval(
                 case_id=case_id,
                 question=question,
                 expected_answer=expected_answer,
@@ -80,6 +85,8 @@ class LLMJudge:
                 citations=citations,
                 category=category,
             )
+            result.evaluation_source = "deterministic_fallback"
+            return result
 
     def _deterministic_rubric_eval(
         self,

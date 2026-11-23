@@ -99,6 +99,11 @@ sys.exit(0)
     assert final_state.execution_result["outcome"] == "SUCCESS"
     assert final_state.execution_result["authorized_by"] == "maintenance_manager"
     assert "WO-" in final_state.execution_result["work_order_id"]
+    audit = final_state.approval_audit[-1]
+    assert audit["approver"] == "maintenance_manager"
+    assert audit["decision"] == "APPROVE"
+    assert "zero-energy" in audit["reason"]
+    assert audit["timestamp"]
 
 
 def test_process_restart_and_reject_resume(durable_db_path, mock_rag):
@@ -147,4 +152,7 @@ sys.exit(0)
     assert rejected_state.status == "REJECTED"
     assert rejected_state.execution_completed is False
     assert rejected_state.execution_result["outcome"] == "ABORTED_BY_HUMAN_REJECTION"
+    assert rejected_state.approval_audit[-1]["approver"] == "safety_officer"
+    assert rejected_state.approval_audit[-1]["decision"] == "REJECT"
+    assert "gas test" in rejected_state.approval_audit[-1]["reason"]
 

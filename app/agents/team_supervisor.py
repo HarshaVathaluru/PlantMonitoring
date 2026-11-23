@@ -17,6 +17,7 @@ Key Architectural Guarantees:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from app.adapters.llm_adapter import LLMAdapter
@@ -85,6 +86,20 @@ class TeamSupervisor:
         self._record_hop(state, "RAGAgent", f"Retrieving grounded SOPs for asset {asset_code}")
         query = raw_alert.get("raw_text") or f"Standard maintenance procedures and troubleshooting for {asset_code}"
         grounded_ans = self.rag_agent.query_procedure(query, asset_code=asset_code)
+        revision_count = 0
+        while not self._rag_answer_is_valid(grounded_ans) and revision_count < self.MAX_REVISIONS:
+            revision_count += 1
+            self._record_hop(state, "CitationReviewer", f"Rejecting unsupported citations; requesting revision {revision_count}")
+            grounded_ans = self.rag_agent.query_procedure(query, asset_code=asset_code)
+        state["revision_count"] = revision_count
+        reviewer_failed = not self._rag_answer_is_valid(grounded_ans)
+        if reviewer_failed:
+            state["audit_trail"].append({
+                "agent": "CitationReviewer",
+                "action": "REJECT_AND_ESCALATE",
+                "reason": "Answer contains a citation absent from retrieved source chunks after bounded revisions.",
+            })
+            state["final_decision"] = "HUMAN_APPROVAL_REQUIRED"
         state["rag_data"] = grounded_ans.model_dump(mode="json")
 
         # Step 3: Recommendation Agent (uses MCP tools for cost and inventory)
@@ -110,14 +125,22 @@ class TeamSupervisor:
         # Step 5: Safety Agent & Reviewer Revision Loop (bounded to MAX_REVISIONS)
         while state["revision_count"] <= self.MAX_REVISIONS:
             self._record_hop(state, "SafetyAgent", "Auditing safety policies, LOTO, and bypass attempts")
+            safety_task = raw_alert.get("raw_text", "General equipment maintenance")
+            if raw_alert.get("requires_loto") or is_energy_isolation_involved:
+                loto_briefing = self.mcp_client.get_prompt("loto_briefing", {"asset_tag": asset_code})
+                safety_task = f"{loto_briefing}\nMaintenance request: {safety_task}"
             safety_eval = self.safety_agent.evaluate_task_safety(
-                task_description=raw_alert.get("raw_text", "General equipment maintenance"),
+                task_description=safety_task,
                 asset_code=asset_code,
                 is_energy_isolation_involved=is_energy_isolation_involved,
                 is_hot_work_or_confined_space=is_hot_work_or_confined_space,
                 override_requested=override_requested,
             )
             state["safety_data"] = safety_eval
+
+            if reviewer_failed:
+                state["final_decision"] = "HUMAN_APPROVAL_REQUIRED"
+                break
 
             # Check if safety gate rejects or demands revision
             if safety_eval.get("bypass_attempted"):
@@ -142,6 +165,14 @@ class TeamSupervisor:
                 break
 
         return state
+
+    @staticmethod
+    def _rag_answer_is_valid(answer: Any) -> bool:
+        """Require all emitted citation IDs to belong to this answer's retrieved chunks."""
+        available = {f"[{result.chunk.chunk_id}]" for result in answer.retrieved_chunks}
+        cited = set(answer.citations)
+        emitted = {f"[{citation}]" for citation in re.findall(r"\[([a-zA-Z0-9_-]+(?:-sec\d+|-pdf-p\d+))\]", answer.answer)}
+        return cited.issubset(available) and emitted.issubset(available)
 
     def _record_hop(self, state: Dict[str, Any], agent_name: str, action_desc: str) -> None:
         state["hop_count"] += 1

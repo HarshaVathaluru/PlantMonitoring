@@ -40,6 +40,7 @@ class WorkflowState(BaseModel):
     approver_role: Optional[str] = None
     approver_comments: Optional[str] = None
     approval_comments: Optional[str] = None
+    approval_audit: List[Dict[str, Any]] = Field(default_factory=list)
     
     # Execution & Audit
     execution_result: Optional[Dict[str, Any]] = None

@@ -1,4 +1,4 @@
-"""PlantGuard Capstone Evidence Generator.
+﻿"""PlantGuard Capstone Evidence Generator.
 
 Generates authoritative, machine-readable evaluation artifacts required by
 the PlantGuard Capstone Evaluation and Scoring Guide:
@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -28,127 +29,67 @@ logger = logging.getLogger("plantguard.evidence_generator")
 
 
 def generate_m1_provider_comparison() -> Dict[str, Any]:
-    """Generate two-provider comparison with latency, tokens, and cost (M1 Advanced Item)."""
-    messages = [
-        {"role": "system", "content": "You are PlantGuard Maintenance Diagnostic Copilot."},
-        {"role": "user", "content": "Diagnose vibration alert on VPW-HYD-PRESS-02 with reading 7.8 mm/s and specify if LOTO is required."},
-    ]
-
-    # Provider 1: Gemini Adapter Mode
-    try:
-        adapter_gemini = LLMAdapter()
-        t0 = time.perf_counter()
-        resp_gemini = adapter_gemini.generate(messages)
-        lat_gemini = round((time.perf_counter() - t0) * 1000.0, 2)
-    except Exception as exc:
-        lat_gemini = 41.8
-        resp_gemini = LLMResponse(
-            content="Hydraulic Press VPW-HYD-PRESS-02 vibration level at 7.8 mm/s requires immediate inspection and Lockout/Tagout (LOTO) isolation.",
-            model="gemini-2.0-flash",
-            provider="gemini",
-            prompt_tokens=48,
-            completion_tokens=32,
-            total_tokens=80,
-            latency_ms=lat_gemini,
-        )
-
-    # Provider 2: OpenAI-Compatible Mode
-    adapter_openai = LLMAdapter()
-    # Emulate OpenAI-compatible provider response
-    t0 = time.perf_counter()
-    resp_openai = LLMResponse(
-        content="Hydraulic Press VPW-HYD-PRESS-02 exceeds vibration limit. Lockout/Tagout (LOTO) isolation required per SOP-LOTO-01.",
-        model="gpt-4o-mini-mock",
-        provider="openai_compatible",
-        prompt_tokens=42,
-        completion_tokens=28,
-        total_tokens=70,
-        latency_ms=45.2,
-    )
-    lat_openai = 45.2
-
+    """Record configured-provider availability without inventing comparison measurements."""
+    settings = get_settings()
     comparison = {
-        "benchmark_date": "2026-08-01",
-        "benchmark_query": "Diagnose vibration alert on VPW-HYD-PRESS-02 with reading 7.8 mm/s and specify if LOTO is required.",
-        "providers_evaluated": [
-            {
-                "provider_id": "gemini",
-                "model": "gemini-2.0-flash",
-                "latency_ms": max(lat_gemini, 38.5),
-                "prompt_tokens": getattr(resp_gemini, "prompt_tokens", 48) or 48,
-                "completion_tokens": getattr(resp_gemini, "completion_tokens", 32) or 32,
-                "total_tokens": getattr(resp_gemini, "total_tokens", 80) or 80,
-                "estimated_cost_usd": 0.00008,
-                "structured_output_supported": True,
-                "status": "ONLINE",
-            },
-            {
-                "provider_id": "openai_compatible",
-                "model": "gpt-4o-mini",
-                "latency_ms": lat_openai,
-                "prompt_tokens": resp_openai.prompt_tokens,
-                "completion_tokens": resp_openai.completion_tokens,
-                "total_tokens": resp_openai.total_tokens,
-                "estimated_cost_usd": 0.00011,
-                "structured_output_supported": True,
-                "status": "ONLINE",
-            },
-        ],
-        "switching_mechanism": "Environment variable PLANTGUARD_LLM_PROVIDER or settings.LLM_PROVIDER - zero code edits required",
-        "validation": "VERIFIED_IDENTICAL_SCHEMA_COMPLIANCE",
+        "benchmark_date": datetime.now(timezone.utc).date().isoformat(),
+        "configured_provider": settings.LLM_PROVIDER.value,
+        "configured_model": settings.LLM_MODEL,
+        "comparison_status": "NOT_RUN",
+        "reason": "A second provider is not configured; no comparative latency, token, or cost values are fabricated.",
+        "providers_evaluated": [],
     }
-
     out_path = Path("evaluation") / "provider_comparison.json"
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(comparison, f, indent=2)
-    logger.info(f"Wrote {out_path}")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(comparison, indent=2), encoding="utf-8")
     return comparison
-
-
 def generate_m1_intake_validation_stats() -> Dict[str, Any]:
-    """Generate intake validation and cross-field plausibility statistics (M1 Advanced Item)."""
+    """Validate committed intake records using the production schema and plausibility checks."""
     safety = SafetyPolicyEngine()
-
-    test_records = [
-        {"type": "telemetry_stream", "vib": 2.4, "temp": 55.0, "press": 6.8, "curr": 14.2, "valid": True},
-        {"type": "telemetry_stream", "vib": 7.8, "temp": 78.0, "press": 210.0, "curr": 22.0, "valid": True},
-        {"type": "telemetry_stream", "vib": -2.0, "temp": 50.0, "press": 5.0, "curr": 10.0, "valid": False},  # Negative vibration
-        {"type": "operator_log", "vib": 3.1, "temp": 62.0, "press": None, "curr": 12.0, "valid": True},
-        {"type": "operator_log", "vib": 4.5, "temp": -45.0, "press": None, "curr": 15.0, "valid": False}, # Physically impossible temp
-        {"type": "scada_batch", "vib": 600.0, "temp": 80.0, "press": 50.0, "curr": 40.0, "valid": False}, # Impossible vibration > 500
-        {"type": "scada_batch", "vib": 3.2, "temp": 64.0, "press": 8.0, "curr": 18.0, "valid": True},
-    ]
+    intake_path = Path("data/plantguard/intake/records.jsonl")
+    test_records = [json.loads(line) for line in intake_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     by_type = {}
     total_valid = 0
     total_rejected = 0
 
     for rec in test_records:
-        rtype = rec["type"]
+        rtype = str(rec.get("source", "unknown"))
         if rtype not in by_type:
-            by_type[rtype] = {"total": 0, "accepted": 0, "rejected_for_safety": 0}
+            by_type[rtype] = {"total": 0, "accepted": 0, "rejected_by_schema_or_plausibility": 0}
         by_type[rtype]["total"] += 1
 
         plaus = safety.validate_physical_plausibility(
-            vibration_mm_s=rec["vib"],
-            temp_c=rec["temp"],
-            pressure_bar=rec["press"],
-            current_a=rec["curr"],
+            vibration_mm_s=(rec.get("readings") or {}).get("vibration_mm_s"),
+            temp_c=(rec.get("readings") or {}).get("temp_c"),
+            pressure_bar=(rec.get("readings") or {}).get("pressure_bar"),
+            current_a=(rec.get("readings") or {}).get("current_a"),
         )
-
-        if plaus.is_plausible and rec["valid"]:
+        try:
+            MaintenanceEvent.model_validate({
+                "event_id": rec["event_id"],
+                "source": {"sensor_alarm": "sensor_alert", "operator_report": "operator_log", "shift_log": "manual_entry", "inspection": "maintenance_system"}.get(rec["source"], rec["source"]),
+                "received_at": rec["received_at"],
+                "raw_text": rec["raw_text"], "asset_code": rec.get("asset_code"), "asset_tag": rec.get("asset_tag"),
+                "readings": rec.get("readings") or {}, "ground_truth": rec.get("ground_truth"),
+            })
+            schema_valid = True
+        except Exception:
+            schema_valid = False
+        if plaus.is_plausible and schema_valid:
             by_type[rtype]["accepted"] += 1
             total_valid += 1
         else:
-            by_type[rtype]["rejected_for_safety"] += 1
+            by_type[rtype]["rejected_by_schema_or_plausibility"] += 1
             total_rejected += 1
 
     stats = {
-        "benchmark_date": "2026-08-01",
+        "benchmark_date": datetime.now(timezone.utc).date().isoformat(),
+        "input_file": str(intake_path),
         "total_ingested_records": len(test_records),
         "total_accepted": total_valid,
-        "total_rejected_physical_impossibility": total_rejected,
-        "cross_field_rejection_rate": round(total_rejected / len(test_records), 4),
+        "total_rejected_schema_or_plausibility": total_rejected,
+        "schema_or_plausibility_rejection_rate": round(total_rejected / len(test_records), 4),
         "record_type_breakdown": by_type,
         "schema_validation_engine": "Pydantic V2 BaseSettings & BaseModel constraints",
     }
@@ -227,8 +168,9 @@ def generate_m2_single_agent_evidence() -> Dict[str, Any]:
     )
 
     evidence = {
-        "benchmark_date": "2026-08-01",
+        "benchmark_date": datetime.now(timezone.utc).date().isoformat(),
         "agent_type": "MaintenanceSingleAgent (Bounded ReAct / Tool-calling)",
+        "execution_mode": "Deterministic scripted adapter; operational tools execute through their real implementations.",
         "query": run_result.query,
         "steps_executed": run_result.steps_executed,
         "stop_reason": run_result.stop_reason,
@@ -257,6 +199,8 @@ def generate_m6_mcp_evidence() -> Dict[str, Any]:
 
     # 1. Tools list
     tools = client.list_tools()
+    resources = client.list_resources()
+    prompts = client.list_prompts()
 
     # 2. Tool 1: check_spare_parts_inventory
     inv = client.call_tool("check_spare_parts_inventory", {"part_number": "SKF-6205-2RSH"})
@@ -274,7 +218,8 @@ def generate_m6_mcp_evidence() -> Dict[str, Any]:
     prompt_text = client.get_prompt("loto_briefing", {"asset_tag": "VPW-HYD-PRESS-02"})
 
     # 7. Team Supervisor full collaborative workflow
-    supervisor = TeamSupervisor()
+    team_mcp_client = PlantGuardMCPClient()
+    supervisor = TeamSupervisor(mcp_client=team_mcp_client)
     team_result = supervisor.run_collaborative_workflow(
         raw_alert={
             "event_id": "EV-MCP-EVIDENCE-01",
@@ -285,16 +230,17 @@ def generate_m6_mcp_evidence() -> Dict[str, Any]:
         },
         part_number="SKF-6205-2RSH",
         quantity=2,
+        is_energy_isolation_involved=True,
     )
 
     evidence = {
-        "benchmark_date": "2026-08-01",
-        "mcp_server": "PlantGuard FastMCP Production Server",
-        "mcp_protocol_version": "2.0 / 2024-11-05",
-        "transport": "Subprocess Stdio Transport crossing OS process boundary",
+        "benchmark_date": datetime.now(timezone.utc).date().isoformat(),
+        "mcp_server": "PlantGuard MCP SDK Server",
+        "protocol_negotiation": "MCP initialize handshake managed by the official SDK",
+        "transport": "SDK-managed subprocess stdio transport crossing OS process boundary",
         "registered_tools": [t["name"] for t in tools],
-        "registered_resources": ["plantguard://policies/procurement_approval_matrix"],
-        "registered_prompts": ["loto_briefing"],
+        "registered_resources": [resource["uri"] for resource in resources],
+        "registered_prompts": [prompt["name"] for prompt in prompts],
         "tool_call_evidence": {
             "check_spare_parts_inventory": inv,
             "calculate_downtime_cost": cost,
@@ -314,9 +260,8 @@ def generate_m6_mcp_evidence() -> Dict[str, Any]:
             "hop_count": team_result.get("hop_count"),
             "revision_count": team_result.get("revision_count"),
             "final_decision": team_result.get("final_decision"),
-            "agents_exercised": ["IntakeAgent", "RAGAgent", "RecommendationAgent", "ProcurementAgent", "SafetyAgent"],
-            "mcp_tools_used_by_agents": ["calculate_downtime_cost", "check_spare_parts_inventory", "get_supplier_info"],
-            "mcp_resource_read_by_procurement": "plantguard://policies/procurement_approval_matrix",
+            "agents_exercised": [entry["agent"] for entry in team_result.get("audit_trail", []) if entry.get("agent")],
+            "observed_mcp_operations": team_mcp_client.call_log,
         },
     }
 

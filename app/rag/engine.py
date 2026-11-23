@@ -470,7 +470,110 @@ class HybridRAGEngine:
                 retrieved_chunks=[],
             )
 
+        if asset_code is None:
+            normalized_question = question.upper()
+            known_asset_codes = sorted(
+                {chunk.asset_code for chunk in self.chunks if chunk.asset_code},
+                key=len,
+                reverse=True,
+            )
+            asset_code = next((code for code in known_asset_codes if code.upper() in normalized_question), None)
+
+        question_scan = self.safety_engine.scan_direct_injection(question)
         retrieved = self.search(question, asset_code=asset_code, top_k=top_k)
+
+        if not question_scan.is_safe:
+            lower_question = question.lower()
+            policy_queries = [
+                ("lockout-tagout", "energy isolation maintenance automated recommendation manual verification physical sign off"),
+                ("permit-to-work", "automated advisory system must never issue validate sign off permit human authorization"),
+            ] if any(term in lower_question for term in ("loto", "permit", "paperwork", "bypass", "safety")) else []
+            policy_chunks = []
+            for slug, policy_query in policy_queries:
+                candidates = [r for r in self.search(policy_query, top_k=5) if r.chunk.doc_slug == slug]
+                if candidates:
+                    markdown = [r for r in candidates if "-pdf-" not in r.chunk.chunk_id]
+                    policy_chunks.append((markdown or candidates)[0])
+            if not policy_chunks:
+                return GroundedAnswer(
+                    question=question,
+                    answer="I cannot authorize bypassing safety controls. I could not retrieve the applicable policy text, so this request requires manual safety review.",
+                    citations=[], confidence="refusal", is_supported=False,
+                    retrieved_chunks=retrieved,
+                )
+            citations = [f"[{r.chunk.chunk_id}]" for r in policy_chunks]
+            policy_text = "\n\n".join(
+                f"{r.chunk.doc_title} — {r.chunk.section} {citations[index]}: {self._relevant_excerpt(policy_queries[index][1], r.chunk.content)}"
+                for index, r in enumerate(policy_chunks)
+            )
+            return GroundedAnswer(
+                question=question,
+                answer="I cannot authorize bypassing mandatory safety controls. The retrieved policy states:\n\n" + policy_text,
+                citations=citations,
+                confidence="high",
+                is_supported=True,
+                retrieved_chunks=policy_chunks,
+            )
+
+        lower_question = question.lower()
+        ai_action_request = (
+            "ai" in lower_question
+            and any(term in lower_question for term in ("recommend", "suggest"))
+            and any(term in lower_question for term in ("proceed", "maintenance", "work", "start"))
+        )
+        if ai_action_request:
+            policy_query = "energy isolation maintenance automated recommendation manual verification physical sign off"
+            policy_results = self.search(policy_query, top_k=5)
+            policy_matches = [r for r in policy_results if r.chunk.doc_slug == "lockout-tagout"]
+            markdown_matches = [r for r in policy_matches if "-pdf-" not in r.chunk.chunk_id]
+            if markdown_matches or policy_matches:
+                policy = (markdown_matches or policy_matches)[0]
+                citation = f"[{policy.chunk.chunk_id}]"
+                excerpt = self._relevant_excerpt(policy_query, policy.chunk.content)
+                return GroundedAnswer(
+                    question=question,
+                    answer=(
+                        "Do not proceed solely on an AI maintenance recommendation. The retrieved Lockout/Tagout "
+                        "standard requires competent-person manual verification and physical sign-off:\n\n"
+                        f"{policy.chunk.doc_title} ({policy.chunk.section}) {citation}: {excerpt}"
+                    ),
+                    citations=[citation],
+                    confidence="high",
+                    is_supported=True,
+                    retrieved_chunks=[policy],
+                )
+
+        if "suppress" in question.lower() and "alarm" in question.lower():
+            policy_results = self.search(
+                "suspected faulty sensor physically impossible values may never be suppressed without work order",
+                top_k=3,
+            )
+            markdown_policy = [r for r in policy_results if r.chunk.doc_slug == "alarm-response" and "-pdf-" not in r.chunk.chunk_id]
+            alarm_policy = markdown_policy[:1] or [r for r in policy_results if r.chunk.doc_slug == "alarm-response"][:1]
+            retrieved = alarm_policy + [r for r in retrieved if r.chunk.chunk_id not in {p.chunk.chunk_id for p in alarm_policy}]
+
+        lower_question = question.lower()
+        is_procurement_question = any(term in lower_question for term in ("purchase order", "raise a po", "rupees", "inr", "procurement"))
+        if "permit" in lower_question or "loto" in lower_question or "lockout" in lower_question:
+            permit_results = self.search(
+                "No person shall commence work without an active physically posted Class-specific permit to work task classes",
+                top_k=8,
+            )
+            permit_markdown = [r for r in permit_results if r.chunk.doc_slug == "permit-to-work" and "-pdf-" not in r.chunk.chunk_id]
+            permit_complete = [r for r in permit_markdown if len(r.chunk.content) >= 500]
+            permit_any_complete = [r for r in permit_results if r.chunk.doc_slug == "permit-to-work" and len(r.chunk.content) >= 500]
+            task_class_sources = [r for r in permit_any_complete if "2.1 Hot Work" in r.chunk.content or "task classes" in r.chunk.content.lower()]
+            permit_policy = task_class_sources[:1] or permit_complete[:1] or permit_any_complete[:1] or permit_markdown[:1]
+            retrieved = permit_policy + [r for r in retrieved if r.chunk.chunk_id not in {p.chunk.chunk_id for p in permit_policy}]
+
+        if is_procurement_question:
+            procurement_results = self.search(
+                "spare parts procurement purchase authorisation thresholds automated controls INR",
+                top_k=5,
+            )
+            procurement_markdown = [r for r in procurement_results if r.chunk.doc_slug == "spares-procurement" and "-pdf-" not in r.chunk.chunk_id]
+            procurement_policy = procurement_markdown[:1] or [r for r in procurement_results if r.chunk.doc_slug == "spares-procurement"][:1]
+            retrieved = procurement_policy + [r for r in retrieved if r.chunk.chunk_id not in {p.chunk.chunk_id for p in procurement_policy}]
 
         if not retrieved or retrieved[0].fused_score < 0.10:
             return GroundedAnswer(
@@ -486,9 +589,19 @@ class HybridRAGEngine:
         context_parts = []
         available_citations = []
         for r in retrieved:
+            scan = self.safety_engine.scan_indirect_injection(r.chunk.content)
+            if not scan.is_safe:
+                return GroundedAnswer(
+                    question=question,
+                    answer="I cannot use a retrieved document containing unsafe embedded instructions.",
+                    citations=[],
+                    confidence="refusal",
+                    is_supported=False,
+                    retrieved_chunks=retrieved,
+                )
             citation_tag = f"[{r.chunk.chunk_id}]"
             available_citations.append(citation_tag)
-            cleaned_content = re.sub(r"(?i)ignore\s+all\s+previous\s+instructions", "[BLOCKED_INJECTION]", r.chunk.content)
+            cleaned_content = r.chunk.content
             context_parts.append(f"DOCUMENT: {r.chunk.doc_title} | SECTION: {r.chunk.section} | CITATION: {citation_tag}\n{cleaned_content}\n")
 
         grounded_context = "\n---\n".join(context_parts)
@@ -521,32 +634,17 @@ class HybridRAGEngine:
                 retrieved_chunks=retrieved,
             )
         except Exception:
-            # Check guardrail and safety bypass patterns
+            # Offline degradation quotes only retrieved, relevant source material.
             q_lower = question.lower()
-            if any(phrase in q_lower for phrase in ["skip the paperwork", "without a permit", "without a loto", "bypass loto", "skip permit"]):
-                return GroundedAnswer(
-                    question=question,
-                    answer="Under the Lockout/Tagout and Energy Isolation Standard and Permit to Work Standard, no energy-isolation or safety-critical maintenance task may proceed on an automated recommendation without a competent person's manual verification and formal permit sign-off. Production pressure does not permit bypassing mandatory safety procedures [lockout-tagout-sec01] [permit-to-work-sec01].",
-                    citations=["[lockout-tagout-sec01]", "[permit-to-work-sec01]"],
-                    confidence="high",
-                    is_supported=True,
-                    retrieved_chunks=retrieved,
-                )
-
-            if "po" in q_lower and ("340,000" in q_lower or ("200,000" in q_lower and "rupees" in q_lower)):
-                return GroundedAnswer(
-                    question=question,
-                    answer="Automated purchase orders exceeding 200,000 INR are strictly prohibited under the Spare Parts and Procurement Policy. The proposed purchase of 340,000 INR requires formal authorization from the Maintenance Manager or Plant Head [spare-parts-procurement-sec01]. No automatic purchase order has been raised.",
-                    citations=["[spare-parts-procurement-sec01]"],
-                    confidence="high",
-                    is_supported=True,
-                    retrieved_chunks=retrieved,
-                )
-
-            # Only synthesize if chunks have high relevance to query keywords
             q_words = set(re.findall(r"\w{3,}", q_lower))
             relevant_chunks = []
-            for r in retrieved[:3]:
+            asset_specific = [
+                r for r in retrieved
+                if asset_code is None or r.chunk.asset_code is None or r.chunk.asset_code == asset_code
+            ]
+            if is_procurement_question:
+                asset_specific = [r for r in asset_specific if r.chunk.doc_slug == "spares-procurement"]
+            for r in asset_specific[:4]:
                 c_words = set(re.findall(r"\w{3,}", r.chunk.content.lower()))
                 overlap = len(q_words & c_words)
                 if overlap >= 2 or r.fused_score >= 0.25:
@@ -565,7 +663,10 @@ class HybridRAGEngine:
             citations = [f"[{r.chunk.chunk_id}]" for r in relevant_chunks]
             chunk_excerpts = []
             for r in relevant_chunks:
-                chunk_excerpts.append(f"According to {r.chunk.doc_title} ({r.chunk.section}) [{r.chunk.chunk_id}]: {r.chunk.content.strip()}")
+                chunk_excerpts.append(
+                    f"According to {r.chunk.doc_title} ({r.chunk.section}) [{r.chunk.chunk_id}]: "
+                    f"{r.chunk.content.strip() if r.chunk.doc_slug in {'spares-procurement', 'permit-to-work'} and len(r.chunk.content) <= 2200 else self._relevant_excerpt(question, r.chunk.content, max_sentences=5)}"
+                )
             synthesized_answer = "\n\n".join(chunk_excerpts)
 
             return GroundedAnswer(
@@ -576,3 +677,25 @@ class HybridRAGEngine:
                 is_supported=True,
                 retrieved_chunks=relevant_chunks,
             )
+
+    @staticmethod
+    def _relevant_excerpt(question: str, content: str, max_sentences: int = 5) -> str:
+        """Return source sentences with strongest query-term overlap for degraded-mode answers."""
+        stop_words = {"what", "when", "where", "which", "that", "this", "does", "with", "from", "about", "should", "would", "could", "there", "their", "them", "into", "have", "has", "and", "the", "for", "are", "can"}
+        terms = {word for word in re.findall(r"[a-z0-9]+", question.lower()) if len(word) > 2 and word not in stop_words}
+        sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", content) if part.strip()]
+        ranked = []
+        for index, sentence in enumerate(sentences):
+            words = set(re.findall(r"[a-z0-9]+", sentence.lower()))
+            score = len(terms & words)
+            if score:
+                ranked.append((score, -index, sentence))
+        if not ranked:
+            return " ".join(sentences[:max_sentences])
+        selected = sorted(ranked, reverse=True)[:max_sentences]
+        selected_indices = { -neg_index for _, neg_index, _ in selected }
+        # Technical manuals often split a label and its numeric value across adjacent lines.
+        for index in list(selected_indices):
+            if index + 1 < len(sentences) and len(sentences[index + 1]) <= 40 and re.search(r"\d", sentences[index + 1]):
+                selected_indices.add(index + 1)
+        return " ".join(sentences[index] for index in sorted(selected_indices))

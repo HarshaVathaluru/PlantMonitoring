@@ -23,14 +23,12 @@
       "total_tokens": 277,
       "cost_usd": 0.0083,
       "metadata": {
-        "query": "What is the purge cycle for the ammonia refrigeration unit?",
         "model": "gemini-2.0-flash",
         "provider": "google"
       }
     }
   ],
   "metadata": {
-    "query": "What is the purge cycle for the ammonia refrigeration unit?",
     "asset": null
   }
 }

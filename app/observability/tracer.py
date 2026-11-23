@@ -169,6 +169,35 @@ class PlantGuardTracer:
         _current_span_stack_cv.set([])
         return act
 
+    def record_llm_usage(self, response: Any, metadata: Optional[Dict[str, Any]] = None) -> None:
+        """Attach actual provider usage to the active span without storing prompt text."""
+        trace = self.active_trace
+        if trace is None:
+            return
+        stack = self._current_span_stack
+        usage = {
+            "provider": getattr(response, "provider", "unknown"),
+            "model": getattr(response, "model", "unknown"),
+            "used_fallback": bool(getattr(response, "used_fallback", False)),
+            **(metadata or {}),
+        }
+        if stack:
+            span = stack[-1]
+            prompt_tokens = int(getattr(response, "prompt_tokens", 0) or 0)
+            completion_tokens = int(getattr(response, "completion_tokens", 0) or 0)
+            reported_total = int(getattr(response, "total_tokens", 0) or 0)
+            if reported_total and prompt_tokens + completion_tokens == 0:
+                completion_tokens = reported_total
+            span.prompt_tokens += prompt_tokens
+            span.completion_tokens += completion_tokens
+            span.total_tokens = span.prompt_tokens + span.completion_tokens
+            span.cost_usd += float(getattr(response, "cost_estimate_usd", 0.0) or 0.0)
+            span.metadata.setdefault("llm_calls", []).append(usage)
+        else:
+            trace.total_tokens += int(getattr(response, "total_tokens", 0) or 0)
+            trace.total_cost_usd += float(getattr(response, "cost_estimate_usd", 0.0) or 0.0)
+            trace.metadata.setdefault("llm_calls", []).append(usage)
+
     def compute_dynamic_kpis(self) -> Dict[str, Any]:
         """Aggregate trace performance metrics across all recorded disk traces."""
         traces: List[Dict[str, Any]] = []
@@ -188,8 +217,9 @@ class PlantGuardTracer:
         total_spans = 0
 
         for t in traces:
-            total_tokens_list.append(t.get("total_tokens", 0))
-            costs.append(t.get("total_cost_usd", 0.0))
+            if int(t.get("total_tokens", 0) or 0) > 0:
+                total_tokens_list.append(t.get("total_tokens", 0))
+                costs.append(t.get("total_cost_usd", 0.0))
             for s in t.get("spans", []):
                 total_spans += 1
                 if s.get("status") == "SUCCESS":
@@ -201,9 +231,9 @@ class PlantGuardTracer:
                 elif "RAG" in name or "investigate" in name.lower() or "answer" in name.lower():
                     rag_latencies.append(dur)
 
-        def pct(vals: List[float], p: float) -> float:
+        def pct(vals: List[float], p: float) -> Optional[float]:
             if not vals:
-                return 0.0
+                return None
             s = sorted(vals)
             k = (len(s) - 1) * (p / 100.0)
             f = int(k)
@@ -217,19 +247,32 @@ class PlantGuardTracer:
         p99_intake = pct(intake_latencies, 99)
         p50_rag = pct(rag_latencies, 50)
         p95_rag = pct(rag_latencies, 95)
-        avg_cost = round(statistics.mean(costs), 4) if costs else 0.0
-        success_rate = round(successful_spans / total_spans, 4) if total_spans else 1.0
-        uptime_pct = round((successful_spans / total_spans * 100.0), 2) if total_spans else 100.0
+        avg_cost = round(statistics.mean(costs), 7) if costs else None
+        success_rate = round(successful_spans / total_spans, 4) if total_spans else None
+        uptime_pct = round((successful_spans / total_spans * 100.0), 2) if total_spans else None
         breaker_trips = sum(
-            1 for t in traces if any(
-                "trip" in s.get("name", "").lower() or "breaker" in s.get("name", "").lower() or s.get("status") == "ERROR"
+            int(t.get("metadata", {}).get("circuit_breaker_trip_count", 0) or 0)
+            for t in traces
+        ) + sum(
+            1 for t in traces if not t.get("metadata", {}).get("circuit_breaker_trip_count") and any(
+                s.get("metadata", {}).get("circuit_breaker_state") == "OPEN"
                 for s in t.get("spans", [])
             )
         )
+        breaker_runs = [t for t in traces if int(t.get("metadata", {}).get("circuit_breaker_trip_count", 0) or 0) > 0]
+        recovery_rate = round(
+            sum(1 for t in breaker_runs if t.get("metadata", {}).get("circuit_breaker_recovered") is True) / len(breaker_runs), 4
+        ) if breaker_runs else None
+        targets = {"max_p95_latency_ms": 250.0, "min_success_rate": 0.99, "loto_bypass_leakage_tolerance": 0.0}
+        enough_data = bool(total_spans and (intake_latencies or rag_latencies))
+        latency_ok = (not rag_latencies or p95_rag <= targets["max_p95_latency_ms"]) and (not intake_latencies or p95_intake <= targets["max_p95_latency_ms"])
+        success_ok = success_rate is not None and success_rate >= targets["min_success_rate"]
 
         return {
-            "benchmark_date": "2026-08-01",
+            "benchmark_date": datetime.now(timezone.utc).date().isoformat(),
             "total_recorded_traces": len(traces),
+            "total_recorded_spans": total_spans,
+            "sample_counts": {"intake_latency": len(intake_latencies), "rag_latency": len(rag_latencies), "span_status": total_spans},
             "metrics": {
                 "uptime_percent": uptime_pct,
                 "intake_p50_latency_ms": p50_intake,
@@ -240,15 +283,16 @@ class PlantGuardTracer:
                 "token_cost_per_investigation_usd": avg_cost,
                 "workflow_step_execution_success_rate": success_rate,
                 "circuit_breaker_trip_count": breaker_trips,
-                "circuit_breaker_recovery_success_rate": 1.0 if breaker_trips > 0 else 1.0,
-                "unauthorized_bypass_interception_rate": 1.0,
+                "circuit_breaker_recovery_success_rate": recovery_rate,
+                "unauthorized_bypass_interception_rate": None,
             },
-            "target_thresholds": {
-                "max_p95_latency_ms": 250.0,
-                "min_success_rate": 0.99,
-                "loto_bypass_leakage_tolerance": 0.0,
+            "target_thresholds": targets,
+            "target_evaluations": {
+                "measured_latency_threshold": "PASS" if enough_data and latency_ok else "FAIL" if enough_data else "INSUFFICIENT_DATA",
+                "measured_success_rate_threshold": "PASS" if success_ok else "FAIL" if success_rate is not None else "INSUFFICIENT_DATA",
+                "loto_bypass_leakage_threshold": "NOT_MEASURED",
             },
-            "compliance_status": "ALL_KPIS_WITHIN_TARGET",
+            "compliance_status": "INSUFFICIENT_DATA" if not enough_data else ("MEASURED_TARGETS_WITHIN" if latency_ok and success_ok else "MEASURED_TARGETS_MISSED"),
         }
 
     def export_kpi_metrics(self, output_path: Optional[Path] = None) -> Dict[str, Any]:

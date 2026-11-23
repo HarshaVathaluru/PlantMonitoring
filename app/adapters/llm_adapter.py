@@ -346,6 +346,7 @@ class LLMAdapter:
     """
 
     MAX_REPAIR_ATTEMPTS = 3
+    MAX_TRANSIENT_RETRIES = 4
 
     def __init__(self, settings: Optional[Settings] = None):
         self._settings = settings or get_settings()
@@ -395,14 +396,43 @@ class LLMAdapter:
         **kwargs: Any,
     ) -> LLMResponse:
         try:
-            return self._primary.generate(messages, temperature, max_tokens, **kwargs)
+            response, attempts = self._retry_transient(
+                lambda: self._primary.generate(messages, temperature, max_tokens, **kwargs)
+            )
         except LLMError as e:
             if self._fallback and self._settings.ENABLE_FALLBACK and e.retryable:
                 logger.warning("Primary LLM call failed, executing fallback", extra={"error": str(e)})
-                resp = self._fallback.generate(messages, temperature, max_tokens, **kwargs)
+                resp, fallback_attempts = self._retry_transient(
+                    lambda: self._fallback.generate(messages, temperature, max_tokens, **kwargs)
+                )
                 resp.used_fallback = True
-                return resp
-            raise
+                response = resp
+                attempts = fallback_attempts
+            else:
+                raise
+        response.metadata["attempts"] = attempts
+        self._record_usage(response, attempts)
+        return response
+
+    def _retry_transient(self, call):
+        """Retry only retryable provider errors; schema/parse errors never enter this loop."""
+        for attempt in range(1, self.MAX_TRANSIENT_RETRIES + 2):
+            try:
+                return call(), attempt
+            except LLMError as exc:
+                if not exc.retryable or attempt > self.MAX_TRANSIENT_RETRIES:
+                    raise
+                delay = 0.25 * (2 ** (attempt - 1))
+                logger.warning("Retryable LLM failure; retry %s/%s in %.2fs", attempt, self.MAX_TRANSIENT_RETRIES, delay)
+                time.sleep(delay)
+
+    @staticmethod
+    def _record_usage(response: LLMResponse, attempt: Optional[int] = None) -> None:
+        try:
+            from app.observability.tracer import PlantGuardTracer
+            PlantGuardTracer().record_llm_usage(response, {"attempt": attempt or 1})
+        except Exception as exc:
+            logger.debug("Unable to attach LLM usage to trace: %s", exc)
 
     def generate_structured(
         self,
@@ -421,21 +451,28 @@ class LLMAdapter:
         for attempt in range(1, self.MAX_REPAIR_ATTEMPTS + 1):
             try:
                 try:
-                    result, response = self._primary.generate_structured(
-                        current_messages, output_schema, temperature, max_tokens, **kwargs
+                    (result, response), transient_attempts = self._retry_transient(
+                        lambda: self._primary.generate_structured(
+                            current_messages, output_schema, temperature, max_tokens, **kwargs
+                        )
                     )
+                    response.metadata["transient_attempts"] = transient_attempts
                 except LLMError as e:
                     if self._fallback and self._settings.ENABLE_FALLBACK and attempt == 1:
                         logger.warning("Primary structured generation failed, using fallback")
-                        result, response = self._fallback.generate_structured(
-                            current_messages, output_schema, temperature, max_tokens, **kwargs
+                        (result, response), transient_attempts = self._retry_transient(
+                            lambda: self._fallback.generate_structured(
+                                current_messages, output_schema, temperature, max_tokens, **kwargs
+                            )
                         )
+                        response.metadata["transient_attempts"] = transient_attempts
                         response.used_fallback = True
                     else:
                         raise
 
                 response.metadata["parse_attempt"] = attempt
                 response.metadata["total_attempts"] = attempt
+                self._record_usage(response, int(response.metadata.get("transient_attempts", 1)))
                 return result, response
 
             except (ValidationError, json.JSONDecodeError, ValueError) as e:

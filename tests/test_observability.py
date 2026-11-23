@@ -52,6 +52,24 @@ def test_tracer_records_span_errors(tmp_path):
     assert "Upstream sensor database timeout" in t.spans[0].error_message
 
 
+def test_tracer_attaches_real_llm_usage_to_active_span(tmp_path):
+    from types import SimpleNamespace
+
+    tracer = PlantGuardTracer(trace_dir=tmp_path)
+    tracer.start_trace("llm_trace")
+    with tracer.span("rag_answer") as span:
+        tracer.record_llm_usage(SimpleNamespace(
+            provider="gemini", model="test-model", used_fallback=False,
+            prompt_tokens=12, completion_tokens=7, total_tokens=19, cost_estimate_usd=0.001,
+        ), {"attempt": 2})
+    trace = tracer.end_trace()
+    assert span.total_tokens == 19
+    assert trace.total_tokens == 19
+    assert trace.total_cost_usd == pytest.approx(0.001)
+    assert span.metadata["llm_calls"][0]["attempt"] == 2
+    assert span.metadata["llm_calls"][0]["provider"] == "gemini"
+
+
 def test_circuit_breaker_transitions_and_fast_fail():
     cb = CircuitBreaker(
         name="test_llm",

@@ -57,7 +57,8 @@ def test_api_dashboard_endpoint():
     html_res = render_dashboard()
     assert isinstance(html_res, str)
     assert "PlantGuard Operations Copilot" in html_res
-    assert "SYSTEM READY (LEVEL 4)" in html_res
+    assert "New maintenance assessment" in html_res
+    assert "Ask the maintenance library" in html_res
 
 
 def test_api_team_collaborate_endpoint():

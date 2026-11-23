@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -38,7 +39,7 @@ def run_failure_injection_benchmark() -> Dict[str, Any]:
     )
 
     results: Dict[str, Any] = {
-        "timestamp": "2026-08-01T12:00:00Z",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "service": "PlantGuard Operations Copilot",
         "circuit_breaker": {
             "name": breaker.name,
@@ -137,6 +138,8 @@ def run_failure_injection_benchmark() -> Dict[str, Any]:
                 p5_successes += 1
 
     final_state = breaker.get_state()
+    trace.metadata["circuit_breaker_trip_count"] = breaker.total_trips
+    trace.metadata["circuit_breaker_recovered"] = final_state == CircuitState.CLOSED
     results["phases"].append({
         "phase": 4,
         "description": "Recovery timeout elapsed and canary probe validation",
@@ -169,31 +172,7 @@ def run_failure_injection_benchmark() -> Dict[str, Any]:
         json.dump(results, f, indent=2)
 
     # Generate run-level KPI table
-    kpi_metrics = {
-        "benchmark_date": "2026-08-01",
-        "metrics": {
-            "uptime_percent": 99.98,
-            "intake_p50_latency_ms": 14.2,
-            "intake_p95_latency_ms": 45.6,
-            "intake_p99_latency_ms": 82.1,
-            "rag_query_p50_latency_ms": 68.4,
-            "rag_query_p95_latency_ms": 142.0,
-            "token_cost_per_investigation_usd": 0.0028,
-            "workflow_step_execution_success_rate": 1.0,
-            "circuit_breaker_trip_count": breaker.total_trips,
-            "circuit_breaker_recovery_success_rate": 1.0,
-            "unauthorized_bypass_interception_rate": 1.0,
-        },
-        "target_thresholds": {
-            "max_p95_latency_ms": 250.0,
-            "min_success_rate": 0.99,
-            "loto_bypass_leakage_tolerance": 0.0,
-        },
-        "compliance_status": "ALL_KPIS_WITHIN_TARGET",
-    }
-
-    with open(eval_dir / "kpi_metrics.json", "w", encoding="utf-8") as f:
-        json.dump(kpi_metrics, f, indent=2)
+    kpi_metrics = tracer.export_kpi_metrics(eval_dir / "kpi_metrics.json")
 
     logger.info("Successfully generated failure_injection_results.json and kpi_metrics.json")
     return results

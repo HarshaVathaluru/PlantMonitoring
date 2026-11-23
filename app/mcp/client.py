@@ -1,20 +1,16 @@
-"""PlantGuard Production MCP Client for Milestone 6 (Level 4 Implementation).
-
-Provides real Model Context Protocol (MCP) transport support:
-1. Subprocess stdio JSON-RPC framing crossing the operating system process boundary
-2. Tool invocation ('check_spare_parts_inventory', 'get_supplier_info', 'calculate_downtime_cost')
-3. Resource reading ('plantguard://policies/procurement_approval_matrix')
-4. Complete separation: Client has zero local imports of maintenance tools; execution occurs exclusively on the MCP server process.
-"""
+"""Synchronous facade over the official MCP SDK stdio client."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 from app.config.settings import get_settings
 
@@ -22,133 +18,99 @@ logger = logging.getLogger("plantguard.mcp.client")
 
 
 class PlantGuardMCPClient:
-    """Production client for interacting with the PlantGuard MCP Server across a transport boundary."""
+    """Call the PlantGuard MCP server through SDK-managed stdio sessions."""
 
     def __init__(self, use_stdio: bool = True):
-        self.use_stdio = use_stdio
+        if not use_stdio:
+            raise ValueError("PlantGuard supports the official MCP stdio transport only")
         self.settings = get_settings()
+        self.project_root = Path(__file__).resolve().parents[2]
+        self.call_log: List[Dict[str, str]] = []
 
-    def _send_transport_frame(self, rpc_request: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Dispatches a JSON-RPC 2.0 protocol frame across the operating system process boundary
-        to the PlantGuard MCP Server.
-        """
-        req_str = json.dumps(rpc_request)
-        logger.info(f"[MCP TRANSPORT -> OUTBOUND] {req_str}")
-
-        cmd = [
-            sys.executable,
-            "-m",
-            "app.mcp.server",
-            "--jsonrpc",
-            req_str,
-        ]
-
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            env={"PYTHONPATH": ".", **dict(os.environ)},
-            timeout=15,
+    def _server_parameters(self) -> StdioServerParameters:
+        env = dict(os.environ)
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = str(self.project_root) + (os.pathsep + existing_pythonpath if existing_pythonpath else "")
+        return StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "app.mcp.server"],
+            cwd=self.project_root,
+            env=env,
         )
 
-        if proc.returncode != 0:
-            logger.error(f"[MCP TRANSPORT ERROR] Subprocess exited with code {proc.returncode}: {proc.stderr}")
-            raise RuntimeError(f"MCP server process error: {proc.stderr}")
+    async def _request(self, operation: str, *args: Any) -> Any:
+        async with stdio_client(self._server_parameters(), errlog=sys.stderr) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await getattr(session, operation)(*args)
+                if getattr(result, "isError", False):
+                    raise RuntimeError(f"MCP {operation} failed: {result}")
+                return result
 
-        stdout_clean = proc.stdout.strip()
-        logger.info(f"[MCP TRANSPORT <- INBOUND] {stdout_clean}")
-
+    def _run(self, operation: str, *args: Any) -> Any:
         try:
-            resp = json.loads(stdout_clean)
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"Malformed JSON-RPC response from MCP transport: {stdout_clean}") from e
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self._request(operation, *args))
+        raise RuntimeError("PlantGuardMCPClient synchronous methods cannot run inside an active event loop")
 
-        if "error" in resp:
-            err = resp["error"]
-            raise RuntimeError(f"MCP Protocol Error: {err.get('message', str(err))}")
+    @staticmethod
+    def _dump(value: Any) -> Dict[str, Any]:
+        if hasattr(value, "model_dump"):
+            return value.model_dump(mode="json", by_alias=True, exclude_none=True)
+        return dict(value)
 
-        return resp.get("result", {})
+    @staticmethod
+    def _text_content(result: Any) -> str:
+        texts = []
+        for item in getattr(result, "content", []) or []:
+            text = getattr(item, "text", None)
+            if text:
+                texts.append(text)
+        return "\n".join(texts)
 
     def list_tools(self) -> List[Dict[str, Any]]:
-        """List all tools registered on the PlantGuard MCP server across transport boundary."""
-        rpc_request = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/list",
-            "params": {},
-        }
-        res = self._send_transport_frame(rpc_request)
-        return res.get("tools", [])
+        result = self._run("list_tools")
+        return [self._dump(tool) for tool in result.tools]
 
-    def list_resources(self) -> List[Dict[str, str]]:
-        """List all resources exposed by the MCP server across transport boundary."""
-        rpc_request = {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "resources/list",
-            "params": {},
-        }
-        res = self._send_transport_frame(rpc_request)
-        return res.get("resources", [])
-
-    def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Execute an MCP tool call across the MCP transport protocol boundary.
-        Executes on the child MCP server process, returning parsed results.
-        """
-        rpc_request = {
-            "jsonrpc": "2.0",
-            "id": 10,
-            "method": "tools/call",
-            "params": {
-                "name": tool_name,
-                "arguments": arguments,
-            },
-        }
-        return self._send_transport_frame(rpc_request)
-
-    def read_resource(self, uri: str) -> str:
-        """
-        Read an MCP resource by URI across the MCP transport protocol boundary.
-        """
-        rpc_request = {
-            "jsonrpc": "2.0",
-            "id": 20,
-            "method": "resources/read",
-            "params": {"uri": uri},
-        }
-        result = self._send_transport_frame(rpc_request)
-        contents = result.get("contents", [])
-        if contents and "text" in contents[0]:
-            return contents[0]["text"]
-        return ""
+    def list_resources(self) -> List[Dict[str, Any]]:
+        result = self._run("list_resources")
+        return [self._dump(resource) for resource in result.resources]
 
     def list_prompts(self) -> List[Dict[str, Any]]:
-        """List prompts registered on the PlantGuard MCP server across transport boundary."""
-        rpc_request = {
-            "jsonrpc": "2.0",
-            "id": 30,
-            "method": "prompts/list",
-            "params": {},
-        }
-        res = self._send_transport_frame(rpc_request)
-        return res.get("prompts", [])
+        result = self._run("list_prompts")
+        return [self._dump(prompt) for prompt in result.prompts]
 
-    def get_prompt(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> str:
-        """Retrieve an authoritative prompt template by name across transport boundary."""
-        rpc_request = {
-            "jsonrpc": "2.0",
-            "id": 31,
-            "method": "prompts/get",
-            "params": {
-                "name": name,
-                "arguments": arguments or {},
-            },
-        }
-        res = self._send_transport_frame(rpc_request)
-        messages = res.get("messages", [])
-        if messages and "content" in messages[0]:
-            c = messages[0]["content"]
-            return c.get("text", "") if isinstance(c, dict) else str(c)
-        return ""
+    def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        result = self._run("call_tool", tool_name, arguments)
+        content = self._text_content(result)
+        if getattr(result, "isError", False) or content.lstrip().lower().startswith(("error:", "unknown tool:")):
+            if content.lower().startswith("unknown tool:"):
+                content = f"Tool not found: {tool_name}"
+            raise RuntimeError(f"MCP tool {tool_name} failed: {content}")
+        structured = getattr(result, "structuredContent", None)
+        if structured is not None:
+            self.call_log.append({"operation": "call_tool", "name": tool_name})
+            return dict(structured)
+        try:
+            parsed = json.loads(content)
+            self.call_log.append({"operation": "call_tool", "name": tool_name})
+            return parsed if isinstance(parsed, dict) else {"result": parsed}
+        except json.JSONDecodeError:
+            self.call_log.append({"operation": "call_tool", "name": tool_name})
+            return {"content": content}
+
+    def read_resource(self, uri: str) -> str:
+        result = self._run("read_resource", uri)
+        self.call_log.append({"operation": "read_resource", "name": uri})
+        contents = getattr(result, "contents", []) or []
+        return str(getattr(contents[0], "text", "")) if contents else ""
+
+    def get_prompt(self, name: str, arguments: Optional[Dict[str, str]] = None) -> str:
+        result = self._run("get_prompt", name, arguments or {})
+        self.call_log.append({"operation": "get_prompt", "name": name})
+        messages = getattr(result, "messages", []) or []
+        if not messages:
+            return ""
+        content = getattr(messages[0], "content", None)
+        return str(getattr(content, "text", ""))

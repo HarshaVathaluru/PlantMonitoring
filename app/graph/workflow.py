@@ -137,6 +137,7 @@ class WorkflowGraphState(TypedDict, total=False):
     approver_role: Optional[str]
     approver_comments: Optional[str]
     approval_comments: Optional[str]
+    approval_audit: List[Dict[str, Any]]
     execution_completed: bool
     execution_result: Optional[Dict[str, Any]]
     errors: List[str]
@@ -156,8 +157,10 @@ class MaintenanceWorkflow:
         checkpointer: Optional[SQLiteCheckpointer] = None,
         rag_engine: Optional[HybridRAGEngine] = None,
         graph_db_path: Optional[str] = None,
+        memory_manager: Optional[Any] = None,
     ):
         self.settings = get_settings()
+        self.memory_manager = memory_manager
         self.checkpointer = checkpointer or SQLiteCheckpointer()
         self.rag_engine = rag_engine or HybridRAGEngine()
         self.graph_db_path = graph_db_path or "plantguard_graph_checkpoints.db"
@@ -308,7 +311,7 @@ class MaintenanceWorkflow:
                 event_id=raw.get("event_id", f"EV-{state.thread_id}"),
                 source=EventSource.SENSOR_ALERT,
                 received_at=datetime.now(timezone.utc),
-                raw_text=raw.get("message", "Telemetry alert"),
+                raw_text=raw.get("message") or "Telemetry alert",
                 asset_tag=asset_tag,
                 readings=readings,
                 severity=RiskLevel(raw.get("severity", "medium").lower()),
@@ -488,17 +491,19 @@ class MaintenanceWorkflow:
         # Wire executed work order into Persistent Memory Engine
         try:
             from app.memory.persistent_memory import PersistentMemoryManager
-            mem = PersistentMemoryManager()
-            asset_tag = state.asset_identifier or (state.raw_alert.get("asset_identifier") if isinstance(state.raw_alert, dict) else "UNKNOWN")
+            mem = self.memory_manager or PersistentMemoryManager()
+            raw = state.raw_alert if isinstance(state.raw_alert, dict) else {}
+            event = state.maintenance_event if isinstance(state.maintenance_event, dict) else {}
+            asset_tag = raw.get("asset_tag") or raw.get("asset_identifier") or event.get("asset_tag") or "UNKNOWN"
             mem.record_maintenance_event(
                 asset_tag=asset_tag,
                 event_type="work_order_dispatched",
                 summary=f"Dispatched work order WO-{state.thread_id} for {asset_tag}.",
                 work_order_id=f"WO-{state.thread_id}",
                 details={
-                    "severity": state.safety_assessment.risk_level.value if state.safety_assessment else "LOW",
+                    "severity": str(event.get("severity") or raw.get("severity") or "LOW"),
                     "authorized_by": auth_role,
-                    "po_cost_inr": state.po_cost_inr,
+                    "po_cost_inr": raw.get("po_cost_inr", 0.0),
                 },
                 identity_id=auth_role,
             )
@@ -513,7 +518,10 @@ class MaintenanceWorkflow:
     def run_until_pause_or_complete(self, state: WorkflowState) -> WorkflowState:
         """Runs the LangGraph StateGraph until a human approval interrupt or completion."""
         initial_dict = self._dict_from_state(state)
-        config = {"configurable": {"thread_id": state.thread_id}}
+        config = {
+            "recursion_limit": self.settings.WORKFLOW_RECURSION_LIMIT,
+            "configurable": {"thread_id": state.thread_id},
+        }
 
         # Invoke the compiled LangGraph StateGraph
         output_dict = self.graph.invoke(initial_dict, config=config)
@@ -550,9 +558,21 @@ class MaintenanceWorkflow:
         loaded.approver_role = role
         loaded.approver_comments = comments
         loaded.approval_comments = comments
+        decision_record = {
+            "approver": role,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "decision": decision.upper(),
+            "reason": comments,
+        }
+        previous_audit = loaded.approval_audit[-1] if loaded.approval_audit else {}
+        if any(previous_audit.get(key) != decision_record[key] for key in ("approver", "decision", "reason")):
+            loaded.approval_audit.append(decision_record)
         self.checkpointer.save(loaded)
 
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {
+            "recursion_limit": self.settings.WORKFLOW_RECURSION_LIMIT,
+            "configurable": {"thread_id": thread_id},
+        }
 
         if decision.upper() == "APPROVE":
             loaded.status = "APPROVED"

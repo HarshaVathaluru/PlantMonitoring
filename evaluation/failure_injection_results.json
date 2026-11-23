@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-08-01T12:00:00Z",
+  "timestamp": "2026-11-18T18:25:25.338392+00:00",
   "service": "PlantGuard Operations Copilot",
   "circuit_breaker": {
     "name": "telemetry_ingest_breaker",
@@ -16,7 +16,7 @@
       "successes": 5,
       "failures": 0,
       "final_state": "CLOSED",
-      "mean_latency_ms": 0.009
+      "mean_latency_ms": 0.007
     },
     {
       "phase": 2,
@@ -35,7 +35,7 @@
       "requests_sent": 4,
       "fallback_served": 4,
       "final_state": "OPEN",
-      "fast_fail_mean_latency_ms": 0.136
+      "fast_fail_mean_latency_ms": 0.369
     },
     {
       "phase": 4,
@@ -47,9 +47,9 @@
     }
   ],
   "latency_comparison_ms": {
-    "normal_call_ms": 0.009,
-    "circuit_open_fast_fail_ms": 0.136,
-    "latency_reduction_ratio": "0.1x faster rejection"
+    "normal_call_ms": 0.007,
+    "circuit_open_fast_fail_ms": 0.369,
+    "latency_reduction_ratio": "0.0x faster rejection"
   },
   "summary": {
     "status": "PASSED",

@@ -23,14 +23,12 @@
       "total_tokens": 0,
       "cost_usd": 0.0,
       "metadata": {
-        "query": "What is the purge cycle for the ammonia refrigeration unit?",
         "model": "gemini-3.1-flash-lite",
         "provider": "gemini"
       }
     }
   ],
   "metadata": {
-    "query": "What is the purge cycle for the ammonia refrigeration unit?",
     "asset": null
   }
 }
