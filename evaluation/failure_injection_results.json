@@ -1,0 +1,60 @@
+{
+  "timestamp": "2026-11-18T18:25:25.338392+00:00",
+  "service": "PlantGuard Operations Copilot",
+  "circuit_breaker": {
+    "name": "telemetry_ingest_breaker",
+    "failure_threshold": 3,
+    "recovery_timeout_seconds": 1.5,
+    "half_open_max_calls": 2
+  },
+  "phases": [
+    {
+      "phase": 1,
+      "description": "Normal steady-state requests",
+      "initial_state": "CLOSED",
+      "requests_sent": 5,
+      "successes": 5,
+      "failures": 0,
+      "final_state": "CLOSED",
+      "mean_latency_ms": 0.007
+    },
+    {
+      "phase": 2,
+      "description": "Injected downstream timeouts exceeding threshold",
+      "initial_state": "CLOSED",
+      "requests_sent": 3,
+      "successes": 0,
+      "failures": 3,
+      "final_state": "OPEN",
+      "tripped": true
+    },
+    {
+      "phase": 3,
+      "description": "Fast-fail rejection and cached fallback routing under OPEN state",
+      "initial_state": "OPEN",
+      "requests_sent": 4,
+      "fallback_served": 4,
+      "final_state": "OPEN",
+      "fast_fail_mean_latency_ms": 0.369
+    },
+    {
+      "phase": 4,
+      "description": "Recovery timeout elapsed and canary probe validation",
+      "state_after_sleep": "HALF_OPEN",
+      "canary_probes_sent": 2,
+      "canary_successes": 2,
+      "final_recovered_state": "CLOSED"
+    }
+  ],
+  "latency_comparison_ms": {
+    "normal_call_ms": 0.007,
+    "circuit_open_fast_fail_ms": 0.369,
+    "latency_reduction_ratio": "0.0x faster rejection"
+  },
+  "summary": {
+    "status": "PASSED",
+    "total_trips": 1,
+    "circuit_recovered": true,
+    "zero_unhandled_crashes": true
+  }
+}

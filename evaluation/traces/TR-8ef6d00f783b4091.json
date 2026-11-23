@@ -1,0 +1,33 @@
+{
+  "trace_id": "TR-8ef6d00f783b4091",
+  "name": "API_Multi_Agent_Team",
+  "session_id": "SESS-a48b3d77",
+  "user_id": "operator_system",
+  "start_time_iso": "2026-11-18T17:54:10.954275+00:00",
+  "end_time_iso": "2026-11-18T17:54:31.020070+00:00",
+  "duration_ms": 20065.74,
+  "total_tokens": 0,
+  "total_cost_usd": 0.0,
+  "spans": [
+    {
+      "span_id": "6a4d81a4fffb",
+      "name": "TeamSupervisor_Collaboration",
+      "parent_span_id": null,
+      "start_time_iso": "2026-11-18T17:54:10.954275+00:00",
+      "end_time_iso": "2026-11-18T17:54:31.020070+00:00",
+      "duration_ms": 20065.74,
+      "status": "SUCCESS",
+      "error_message": null,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "metadata": {
+        "asset_tag": "AC-01"
+      }
+    }
+  ],
+  "metadata": {
+    "asset_tag": "AC-01"
+  }
+}

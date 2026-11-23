@@ -1,0 +1,8 @@
+{
+  "benchmark_date": "2026-11-18",
+  "configured_provider": "gemini",
+  "configured_model": "gemini-3.1-flash-lite",
+  "comparison_status": "NOT_RUN",
+  "reason": "A second provider is not configured; no comparative latency, token, or cost values are fabricated.",
+  "providers_evaluated": []
+}

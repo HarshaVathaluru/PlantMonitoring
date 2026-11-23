@@ -1,0 +1,31 @@
+{
+  "benchmark_date": "2026-11-18",
+  "input_file": "data\\plantguard\\intake\\records.jsonl",
+  "total_ingested_records": 200,
+  "total_accepted": 180,
+  "total_rejected_schema_or_plausibility": 20,
+  "schema_or_plausibility_rejection_rate": 0.1,
+  "record_type_breakdown": {
+    "sensor_alarm": {
+      "total": 95,
+      "accepted": 76,
+      "rejected_by_schema_or_plausibility": 19
+    },
+    "operator_report": {
+      "total": 50,
+      "accepted": 50,
+      "rejected_by_schema_or_plausibility": 0
+    },
+    "shift_log": {
+      "total": 39,
+      "accepted": 38,
+      "rejected_by_schema_or_plausibility": 1
+    },
+    "inspection": {
+      "total": 16,
+      "accepted": 16,
+      "rejected_by_schema_or_plausibility": 0
+    }
+  },
+  "schema_validation_engine": "Pydantic V2 BaseSettings & BaseModel constraints"
+}

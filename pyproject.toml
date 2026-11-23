@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plantguard"
+version = "1.0.0"
+description = "Production-Grade Predictive Maintenance & Supply Chain Operations Copilot"
+authors = [{ name = "PlantGuard Engineering Team" }]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic==2.14.3",
+    "pydantic-settings==2.16.3",
+    "requests==2.34.2",
+    "fastapi==0.163.1",
+    "uvicorn==0.54.0",
+    "langgraph==1.2.22",
+    "langgraph-checkpoint==4.3.2",
+    "langchain-core==1.8.1",
+    "mcp==1.26.0",
+    "httpx==0.28.1",
+    "faker==40.54.0",
+    "python-dotenv==1.2.2",
+    "numpy==2.4.6",
+    "scikit-learn==1.9.1",
+    "scipy==1.17.1",
+    "pypdf==5.3.1",
+    "langgraph-checkpoint-sqlite==3.1.3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.2.0", "pytest-asyncio==1.5.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"

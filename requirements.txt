@@ -1,0 +1,20 @@
+# PlantGuard Strictly Pinned Dependencies for Clean-Clone Reproducibility
+pydantic==2.14.3
+pydantic-settings==2.16.3
+requests==2.34.2
+fastapi==0.163.1
+uvicorn==0.54.0
+langgraph==1.2.22
+langgraph-checkpoint==4.3.2
+langchain-core==1.8.1
+pytest==9.2.0
+pytest-asyncio==1.5.0
+httpx==0.28.1
+faker==40.54.0
+python-dotenv==1.2.2
+mcp==1.26.0
+numpy==2.4.6
+scikit-learn==1.9.1
+scipy==1.17.1
+pypdf==5.3.1
+langgraph-checkpoint-sqlite==3.1.3

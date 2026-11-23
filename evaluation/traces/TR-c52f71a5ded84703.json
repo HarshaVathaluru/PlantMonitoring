@@ -1,0 +1,34 @@
+{
+  "trace_id": "TR-c52f71a5ded84703",
+  "name": "API_Investigate_RAG",
+  "session_id": "SESS-371102cd",
+  "user_id": "operator_system",
+  "start_time_iso": "2026-11-18T16:29:20.764467+00:00",
+  "end_time_iso": "2026-11-18T16:29:20.764467+00:00",
+  "duration_ms": 0.03,
+  "total_tokens": 277,
+  "total_cost_usd": 0.0083,
+  "spans": [
+    {
+      "span_id": "186087536f1f",
+      "name": "RAG_Search_And_Grounding",
+      "parent_span_id": null,
+      "start_time_iso": "2026-11-18T16:29:20.764467+00:00",
+      "end_time_iso": "2026-11-18T16:29:20.764467+00:00",
+      "duration_ms": 0.03,
+      "status": "SUCCESS",
+      "error_message": null,
+      "prompt_tokens": 185,
+      "completion_tokens": 92,
+      "total_tokens": 277,
+      "cost_usd": 0.0083,
+      "metadata": {
+        "model": "gemini-2.0-flash",
+        "provider": "google"
+      }
+    }
+  ],
+  "metadata": {
+    "asset": null
+  }
+}

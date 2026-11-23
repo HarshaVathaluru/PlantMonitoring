@@ -1,0 +1,77 @@
+{
+  "trace_id": "TR-8ce0558d915148e8",
+  "name": "Failure-Injection-Benchmark",
+  "session_id": "SESS-adc38619",
+  "user_id": "operator_system",
+  "start_time_iso": "2026-11-18T18:25:25.340409+00:00",
+  "end_time_iso": "2026-11-18T18:25:27.006278+00:00",
+  "duration_ms": 65.57,
+  "total_tokens": 0,
+  "total_cost_usd": 0.0,
+  "spans": [
+    {
+      "span_id": "d8aea7d673aa",
+      "name": "Phase1_Normal_Operations",
+      "parent_span_id": null,
+      "start_time_iso": "2026-11-18T18:25:25.340409+00:00",
+      "end_time_iso": "2026-11-18T18:25:25.340409+00:00",
+      "duration_ms": 0.05,
+      "status": "SUCCESS",
+      "error_message": null,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "metadata": {}
+    },
+    {
+      "span_id": "d59a7ba6b912",
+      "name": "Phase2_Injected_Faults",
+      "parent_span_id": null,
+      "start_time_iso": "2026-11-18T18:25:25.340409+00:00",
+      "end_time_iso": "2026-11-18T18:25:25.404067+00:00",
+      "duration_ms": 63.24,
+      "status": "SUCCESS",
+      "error_message": null,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "metadata": {}
+    },
+    {
+      "span_id": "d677aaa6169a",
+      "name": "Phase3_Fast_Fail",
+      "parent_span_id": null,
+      "start_time_iso": "2026-11-18T18:25:25.404067+00:00",
+      "end_time_iso": "2026-11-18T18:25:25.404834+00:00",
+      "duration_ms": 1.5,
+      "status": "SUCCESS",
+      "error_message": null,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "metadata": {}
+    },
+    {
+      "span_id": "5bdef0071b17",
+      "name": "Phase5_Canary_Recovery",
+      "parent_span_id": null,
+      "start_time_iso": "2026-11-18T18:25:27.006278+00:00",
+      "end_time_iso": "2026-11-18T18:25:27.006278+00:00",
+      "duration_ms": 0.78,
+      "status": "SUCCESS",
+      "error_message": null,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "metadata": {}
+    }
+  ],
+  "metadata": {
+    "circuit_breaker_trip_count": 1,
+    "circuit_breaker_recovered": true
+  }
+}

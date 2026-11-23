@@ -1,0 +1,100 @@
+{
+  "benchmark_date": "2026-11-18",
+  "mcp_server": "PlantGuard MCP SDK Server",
+  "protocol_negotiation": "MCP initialize handshake managed by the official SDK",
+  "transport": "SDK-managed subprocess stdio transport crossing OS process boundary",
+  "registered_tools": [
+    "check_spare_parts_inventory",
+    "get_supplier_info",
+    "calculate_downtime_cost"
+  ],
+  "registered_resources": [
+    "plantguard://policies/procurement_approval_matrix"
+  ],
+  "registered_prompts": [
+    "loto_briefing"
+  ],
+  "tool_call_evidence": {
+    "check_spare_parts_inventory": {
+      "part_number": "SKF-6205-2RSH",
+      "description": "",
+      "asset_code": "",
+      "on_hand": 0,
+      "reorder_point": 0,
+      "unit_cost_inr": 0,
+      "lead_time_days": 0,
+      "supplier_tier": "",
+      "supplier_id": null,
+      "minimum_order_quantity": null,
+      "is_stock_low": false,
+      "error": "Part 'SKF-6205-2RSH' not found in inventory registry"
+    },
+    "calculate_downtime_cost": {
+      "asset_tag": "VPW-HYD-PRESS-02",
+      "downtime_minutes": 60,
+      "hourly_rate_inr": 40000,
+      "rate_source": "asset_specific",
+      "total_cost_inr": 40000,
+      "criticality": "A",
+      "safety_risk": "HIGH",
+      "environmental_impact": "MINOR",
+      "error": null
+    },
+    "get_supplier_info": {
+      "supplier_id": "VPW-SUP-001",
+      "name": "Misra Bearings & Seals",
+      "tier": "T1",
+      "city": "Chennai",
+      "lead_time_days": null,
+      "status": "ACTIVE"
+    }
+  },
+  "resource_read_evidence": {
+    "uri": "plantguard://policies/procurement_approval_matrix",
+    "length_chars": 354,
+    "content_preview": "# PlantGuard Authoritative Procurement Approval Matrix\n\n| Total PO amount (INR) | Approver |\n|---|---|\n| <= 200,000 | Automated system |\n| 200,001 to 1,000,000 | Maintenance Manager |\n| > 1,000,000 | "
+  },
+  "prompt_get_evidence": {
+    "name": "loto_briefing",
+    "rendered_prompt": "Retrieve the authorized LOTO procedure for VPW-HYD-PRESS-02. List only verified isolation, lock placement, and zero-energy verification steps from SOP-LOTO-01, with source citations."
+  },
+  "multi_agent_team_supervisor_run": {
+    "workflow_id": "EV-MCP-EVIDENCE-01",
+    "hop_count": 5,
+    "revision_count": 0,
+    "final_decision": "HUMAN_APPROVAL_REQUIRED",
+    "agents_exercised": [
+      "IntakeAgent",
+      "RAGAgent",
+      "RecommendationAgent",
+      "ProcurementAgent",
+      "SafetyAgent"
+    ],
+    "observed_mcp_operations": [
+      {
+        "operation": "call_tool",
+        "name": "calculate_downtime_cost"
+      },
+      {
+        "operation": "call_tool",
+        "name": "check_spare_parts_inventory"
+      },
+      {
+        "operation": "call_tool",
+        "name": "check_spare_parts_inventory"
+      },
+      {
+        "operation": "read_resource",
+        "name": "plantguard://policies/procurement_approval_matrix"
+      },
+      {
+        "operation": "read_resource",
+        "name": "plantguard://policies/procurement_approval_matrix"
+      },
+      {
+        "operation": "get_prompt",
+        "name": "loto_briefing"
+      }
+    ]
+  }
+}
