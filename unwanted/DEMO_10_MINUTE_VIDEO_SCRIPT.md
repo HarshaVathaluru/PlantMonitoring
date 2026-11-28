@@ -38,7 +38,7 @@
 
 ### 0:00–0:40 — Opening
 
-**On screen:** Start on the dashboard at the top of the page. Pause briefly so the title, DEMO | SAMPLE DATA badge, and service status are readable.
+**On screen:** Start on the dashboard at the top of the page. Pause briefly so the title and status are readable.
 
 **Say:**
 
@@ -46,23 +46,23 @@
 
 ### 0:40–1:40 — Problem and design
 
-**On screen:** Point to Overview, Maintenance assessment, and Manuals & SOPs. Briefly point out the How it works strip, then return to the assessment and search panels.
+**On screen:** Point to the three navigation items: Overview, Maintenance assessment, and Manuals & SOPs. Briefly show the project architecture document if useful, then return to the dashboard.
 
 **Say:**
 
-> Maintenance teams need more than an answer from a model. They need a response tied to equipment readings, approved instructions, and an auditable decision about whether work can proceed. PlantGuard combines typed alert intake, deterministic checks, hybrid manual retrieval, a stateful workflow, and a human approval gate. The dashboard labels the page as demo/sample data and explains the three steps: check an alert, review evidence, and record a decision. It keeps service health, assessment, and procedure search together. I’ll walk through each of those using the running application.
+> Maintenance teams need more than an answer from a model. They need a response tied to equipment readings, approved instructions, and an auditable decision about whether work can proceed. PlantGuard combines typed alert intake, deterministic checks, hybrid manual retrieval, a stateful workflow, and a human approval gate. The dashboard keeps the operator’s main tasks together: check service health, assess an alert, and look up a procedure. I’ll walk through each of those using the running application.
 
 ### 1:40–2:40 — Live system status
 
-**On screen:** Show the API service, AI provider, provider protection, and recent request cards. Click the refresh icon. Point to the recent system activity panel if there are existing requests.
+**On screen:** Show the service, language model, circuit breaker, and recorded trace cards. Click the refresh icon. Point to the recent activity panel if there are existing traces.
 
 **Say:**
 
-> The first row is populated from the service’s health and observability endpoints, rather than from fixed demonstration numbers. It shows whether the API is reachable, which model provider is configured, whether provider protection is active, and the number of recent requests. The activity list gives a quick view of saved API request records. This matters during an incident: an operator can see whether the application is available before using its recommendations. I can refresh the status without leaving the page.
+> The first row is populated from the service’s health and observability endpoints, rather than from fixed demonstration numbers. It shows whether the API is reachable, which model provider is configured, the circuit breaker state, and the number of recorded traces. The activity list gives a quick view of recent requests. This matters during an incident: an operator can see whether the application is available before using its recommendations. I can refresh the status without leaving the page.
 
 ### 2:40–3:50 — Grounded knowledge search
 
-**On screen:** In “Search manuals and safety standards,” enter: `What must be verified before maintenance on a hydraulic press?` Select `HYD-PRESS`, then search. Wait for the answer and point out the citations and supported/unverified label.
+**On screen:** In “Ask the maintenance library,” enter: `What must be verified before maintenance on a hydraulic press?` Select `HYD-PRESS`, then search. Wait for the answer and point out the citations and supported/unverified label.
 
 **Say:**
 
