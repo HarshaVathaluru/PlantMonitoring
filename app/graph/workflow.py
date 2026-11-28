@@ -132,6 +132,9 @@ class SQLiteCheckpointer:
         pending: List[Dict[str, Any]] = []
         decisions: List[Dict[str, Any]] = []
         for row in rows:
+            # Golden-set fixtures share the checkpoint database but are not live work.
+            if str(row["thread_id"]).startswith("EVAL-"):
+                continue
             data = json.loads(row["state_json"])
             raw_alert = data.get("raw_alert") or {}
             common = {
