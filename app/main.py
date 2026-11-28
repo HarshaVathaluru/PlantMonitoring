@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pathlib import Path
 from pydantic import BaseModel, Field
 
@@ -112,6 +112,12 @@ class TeamCollaborateRequest(BaseModel):
 
 
 # ── API Endpoints ──
+
+@app.get("/", include_in_schema=False)
+def root():
+    """Send browser visits at the service root to the operations dashboard."""
+    return RedirectResponse(url="/dashboard")
+
 
 @app.get("/health")
 def health_check():
@@ -333,6 +339,16 @@ def approve_workflow(req: WorkflowApprovalRequest):
                 }
             except Exception as e:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@app.get("/api/v1/approvals/recent")
+def list_recent_approvals(limit: int = 20):
+    """List pending workflow reviews and saved human approval decisions."""
+    return {
+        **checkpointer.list_recent_approval_records(limit=limit),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "refresh_interval_seconds": 15,
+    }
 
 
 @app.get("/api/v1/workflow/{thread_id}")

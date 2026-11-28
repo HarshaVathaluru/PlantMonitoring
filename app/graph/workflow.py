@@ -110,6 +110,54 @@ class SQLiteCheckpointer:
                 return WorkflowState(**data)
         return None
 
+    def list_recent_approval_records(self, limit: int = 50) -> Dict[str, List[Dict[str, Any]]]:
+        """Return the latest pending reviews and recorded human decisions."""
+        limit = max(1, min(limit, 200))
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT c.thread_id, c.status, c.state_json, c.created_at
+                FROM checkpoints AS c
+                JOIN (
+                    SELECT thread_id, MAX(id) AS latest_id
+                    FROM checkpoints
+                    GROUP BY thread_id
+                ) AS latest ON c.id = latest.latest_id
+                ORDER BY c.id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        pending: List[Dict[str, Any]] = []
+        decisions: List[Dict[str, Any]] = []
+        for row in rows:
+            data = json.loads(row["state_json"])
+            raw_alert = data.get("raw_alert") or {}
+            common = {
+                "thread_id": row["thread_id"],
+                "asset_tag": raw_alert.get("asset_tag", "Unknown asset"),
+                "status": row["status"],
+            }
+            if row["status"] == "WAITING_FOR_APPROVAL" and not data.get("approval_decision"):
+                pending.append({
+                    **common,
+                    "reason": data.get("approval_reason"),
+                    "updated_at": data.get("updated_at") or row["created_at"],
+                })
+            for record in data.get("approval_audit") or []:
+                decisions.append({
+                    **common,
+                    "approver": record.get("approver"),
+                    "decision": record.get("decision"),
+                    "reason": record.get("reason"),
+                    "timestamp": record.get("timestamp"),
+                })
+
+        pending.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
+        decisions.sort(key=lambda item: item.get("timestamp") or "", reverse=True)
+        return {"pending": pending[:limit], "decisions": decisions[:limit]}
+
 
 # ── Production LangGraph Typed State Schema ──
 
